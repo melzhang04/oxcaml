@@ -1,13 +1,13 @@
-open! Core
-open Tictactoe_logic_library
-open Hw2_tictactoe_logic
+(* open! Core
+open Battleship_logic_library
+open Hw2_battleship_logic
 open Hw4_alpha_beta_search
-open Hw3_tictactoe_logic_test
+open Hw3_battleship_logic_test
 
 type player_kind_or_empty =
   | E
-  | O
-  | X
+  | P1
+  | P2
 
 let print_computer_move (board_as_lists : player_kind_or_empty list list) max_depth =
   let board : Player_kind.t Cell_position.Map.t =
@@ -16,8 +16,8 @@ let print_computer_move (board_as_lists : player_kind_or_empty list list) max_de
         let player_kind : Player_kind.t option =
           match player_kind_or_empty with
           | E -> None
-          | O -> Some O
-          | X -> Some X
+          | P1 -> Some P1
+          | P2 -> Some P2
         in
         Option.map player_kind ~f:(fun player_kind : (Cell_position.t * Player_kind.t) ->
           { row; column = col }, player_kind)))
@@ -329,4 +329,4 @@ let%expect_test "X finds a winning move that will lead to winning in 2 steps" =
      | |
     (In_progress (whose_turn O))
     |}]
-;;
+;; *)

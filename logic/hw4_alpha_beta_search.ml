@@ -1,9 +1,8 @@
-open! Core
-open Hw2_tictactoe_logic
+(* open! Core
+open Hw2_battleship_logic
 
 let heuristic_value (node : Game_state.t) =
   match node.decision with
-  | Stalemate -> 0
   | In_progress _ ->
     (* For more complex games, like Gomoku/connect6, we should have here a heuristic
        function that scores how good this state for player X, i.e., the higher the number
@@ -11,15 +10,15 @@ let heuristic_value (node : Game_state.t) =
     0
   | Winner player_kind ->
     (match player_kind with
-     | X -> Int.max_value
-     | O -> Int.min_value)
+     | P1 -> Int.max_value
+     | P2 -> Int.min_value)
 ;;
 
 let children node ~(sort_by_whose_turn : Player_kind.t) =
   let compare =
     match sort_by_whose_turn with
-    | X -> Int.descending
-    | O -> Int.ascending
+    | P1 -> Int.descending
+    | P2 -> Int.ascending
   in
   let moves = Game_state.get_all_moves node in
   List.filter_map moves ~f:(fun move -> Game_state.make_move node move |> Result.ok)
@@ -57,30 +56,30 @@ let rec alpha_beta (node : Game_state.t) depth alpha beta =
   match node.decision with
   | In_progress { whose_turn } when depth > 0 ->
     (match whose_turn with
-     | X ->
+     | P1 ->
        List.fold_until
          (children node ~sort_by_whose_turn:whose_turn)
-         ~init:(Int.min_value, alpha)
-         ~finish:(fun (value, _alpha) -> value)
-         ~f:(fun (value, alpha) child ->
+         ~init:(~value:Int.min_value, ~alpha)
+         ~finish:(fun (~value, ~alpha:_) -> value)
+         ~f:(fun (~value, ~alpha) child ->
            let value = Int.max value (alpha_beta child (depth - 1) alpha beta) in
            let alpha = Int.max alpha value in
-           if value >= beta then Stop value else Continue (value, alpha))
-     | O ->
+           if value >= beta then Stop value else Continue (~value, ~alpha))
+     | P2 ->
        List.fold_until
          (children node ~sort_by_whose_turn:whose_turn)
-         ~init:(Int.max_value, beta)
-         ~finish:(fun (value, _beta) -> value)
-         ~f:(fun (value, beta) child ->
+         ~init:(~value:Int.max_value, ~beta)
+         ~finish:(fun (~value, ~beta:_) -> value)
+         ~f:(fun (~value, ~beta) child ->
            let value = Int.min value (alpha_beta child (depth - 1) alpha beta) in
            let beta = Int.min beta value in
-           if value <= alpha then Stop value else Continue (value, beta)))
+           if value <= alpha then Stop value else Continue (~value, ~beta)))
   | _ -> heuristic_value node
 ;;
 
 let alpha_beta (node : Game_state.t) ~depth =
   match node.decision with
-  | Winner _ | Stalemate -> None
+  | Winner _ -> None
   | In_progress { whose_turn } ->
     let moves = Game_state.get_all_moves node in
     let moves_and_children =
@@ -95,11 +94,11 @@ let alpha_beta (node : Game_state.t) ~depth =
     in
     let best_move =
       (match whose_turn with
-       | X -> List.max_elt
-       | O -> List.min_elt)
+       | P1 -> List.max_elt
+       | P2 -> List.min_elt)
         moves_and_children_and_values
         ~compare:(fun (_move, _child, v1) (_move, _child, v2) -> Int.compare v1 v2)
       |> Option.map ~f:(fun (move, _child, _value) -> move)
     in
     best_move
-;;
+;; *)
