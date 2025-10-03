@@ -19,7 +19,9 @@ module Cell_position : sig
   include Comparable.S with type t := t
 end
 
-module Move : module type of Cell_position
+module Move : sig
+  include module type of Cell_position with type t = Cell_position.t
+end
 
 module Cell_type : sig
   type t =
@@ -90,6 +92,19 @@ module Game_state : sig
     -> cols:int
     -> p1_ships:Ship.t list
     -> p2_ships:Ship.t list
+    -> (t, Create_error.t list) Result.t
+
+  val random_fleet
+    :  rows:int
+    -> cols:int
+    -> player:Player_kind.t
+    -> seed:int
+    -> Ship.t list
+
+  val create_random
+    :  rows:int
+    -> cols:int
+    -> seed:int
     -> (t, Create_error.t list) Result.t
 
   val get_all_moves : t -> Move.t list

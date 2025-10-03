@@ -1,104 +1,175 @@
-(* open! Core
+open! Core
 open Hw2_battleship_logic
 
-let heuristic_value (node : Game_state.t) =
-  match node.decision with
-  | In_progress _ ->
-    (* For more complex games, like Gomoku/connect6, we should have here a heuristic
-       function that scores how good this state for player X, i.e., the higher the number
-       the better it is for X. *)
-    0
-  | Winner player_kind ->
-    (match player_kind with
-     | P1 -> Int.max_value
-     | P2 -> Int.min_value)
-;;
+let pick_random_move (state : Game_state.t) ~seed =
+  Core.Random.init seed;
+  match Game_state.get_all_moves state with
+  | [] -> None
+  | moves -> List.random_element moves
 
-let children node ~(sort_by_whose_turn : Player_kind.t) =
-  let compare =
-    match sort_by_whose_turn with
-    | P1 -> Int.descending
-    | P2 -> Int.ascending
+let play_random (state : Game_state.t) ~seed =
+  match pick_random_move state ~seed with
+  | None -> state
+  | Some mv -> Option.value (Result.ok (Game_state.make_move state mv)) ~default:state
+
+let greedy_move (state : Game_state.t) : Move.t option =
+  match state.decision with
+  | Decision.Winner _ -> None
+  | Decision.In_progress { whose_turn } ->
+    let target =
+      if Player_kind.equal whose_turn Player_kind.P1 then state.p2_board else state.p1_board
+    in
+    let shots = target.Board.shots in
+    let is_hit p = match Map.find shots p with Some Cell_type.Hit -> true | _ -> false in
+    let already p = Map.mem shots p in
+    let in_bounds p = Board.is_legal_cell_position target p in
+    let neighbors { Cell_position.row; column } =
+      [ { Cell_position.row = row - 1; column }
+      ; { Cell_position.row = row + 1; column }
+      ; { Cell_position.row = row; column = column - 1 }
+      ; { Cell_position.row = row; column = column + 1 }
+      ]
+    in
+    let hits =
+      Map.keys shots |> List.filter ~f:is_hit
+    in
+    let candidates_from_hits =
+      hits
+      |> List.concat_map ~f:neighbors
+      |> List.filter ~f:in_bounds
+      |> List.filter ~f:(fun p -> not (already p))
+    in
+    match candidates_from_hits with
+    | p :: _ -> Some p
+    | [] ->
+      let all =
+        List.concat_map (List.init target.rows ~f:Fn.id) ~f:(fun r ->
+          List.map (List.init target.cols ~f:Fn.id)
+            ~f:(fun c -> { Cell_position.row = r; column = c }))
+      in
+      let checker =
+        all
+        |> List.filter ~f:(fun { Cell_position.row; column } -> ((row + column) land 1) = 0)
+        |> List.filter ~f:(fun p -> not (already p))
+      in
+      (match checker with
+       | p :: _ -> Some p
+       | [] -> List.find all ~f:(fun p -> not (already p)))
+
+let fleet_lengths = [ 2; 3; 3; 4; 5 ]
+
+let cell_ok_for_ship (shots : Cell_type.t Cell_position.Map.t) (p : Cell_position.t) =
+  match Map.find shots p with
+  | Some Cell_type.Miss -> false
+  | _ -> true
+
+let score_placement
+    ~(shots : Cell_type.t Cell_position.Map.t)
+    (cells : Cell_position.t list)
+  =
+  let hits_in =
+    List.count cells ~f:(fun p ->
+      match Map.find shots p with Some Cell_type.Hit -> true | _ -> false)
   in
-  let moves = Game_state.get_all_moves node in
-  List.filter_map moves ~f:(fun move -> Game_state.make_move node move |> Result.ok)
-  (* Sorting the children by heuristic values gives the best alpha-beta pruning. *)
-  |> List.sort ~compare:(Comparable.lift ~f:heuristic_value compare)
-;;
+  if List.for_all cells ~f:(cell_ok_for_ship shots)
+  then 1 + (hits_in * 5)
+  else 0
 
-(*=
-https://en.wikipedia.org/wiki/Alpha%E2%80%93beta_pruning
-
-function alpha_beta(node, depth, α, β, maximizing_player) is
-    if depth == 0 or node is terminal then
-        return the heuristic value of node
-    if maximizing_player then
-        value := −∞
-        for each child of node do
-            value := max(value, alpha_beta(child, depth − 1, α, β, FALSE))
-            if value ≥ β then
-                break (* β cutoff *)
-            α := max(α, value)
-        return value
+let probability_move (state : Game_state.t) ~(seed:int) : Move.t option =
+  match state.decision with
+  | Decision.Winner _ -> None
+  | Decision.In_progress { whose_turn } ->
+    let target =
+      if Player_kind.equal whose_turn Player_kind.P1 then state.p2_board else state.p1_board
+    in
+    let shots = target.Board.shots in
+    let scores = Array.make_matrix ~dimx:target.rows ~dimy:target.cols 0 in
+    let bump { Cell_position.row; column } v =
+      scores.(row).(column) <- scores.(row).(column) + v
+    in
+    let in_bounds p = Board.is_legal_cell_position target p in
+    let line_from start len ~horizontal =
+      List.init len ~f:(fun i ->
+        if horizontal
+        then { Cell_position.row = start.Cell_position.row; column = start.Cell_position.column + i }
+        else { Cell_position.row = start.Cell_position.row + i; column = start.Cell_position.column })
+    in
+    List.iter fleet_lengths ~f:(fun len ->
+      for r = 0 to target.rows - 1 do
+        for c = 0 to target.cols - 1 do
+          let start = { Cell_position.row = r; column = c } in
+          let cells_h = line_from start len ~horizontal:true in
+          if List.for_all cells_h ~f:in_bounds then
+            let w = score_placement ~shots cells_h in
+            if w > 0 then List.iter cells_h ~f:(fun p -> bump p w);
+          let cells_v = line_from start len ~horizontal:false in
+          if List.for_all cells_v ~f:in_bounds then
+            let w = score_placement ~shots cells_v in
+            if w > 0 then List.iter cells_v ~f:(fun p -> bump p w);
+        done
+      done);
+    let unknowns =
+      List.concat_map (List.init target.rows ~f:Fn.id) ~f:(fun r ->
+        List.filter_map (List.init target.cols ~f:Fn.id) ~f:(fun c ->
+          let p = { Cell_position.row = r; column = c } in
+          if Map.mem shots p then None else Some p))
+    in
+    if List.is_empty unknowns then None
     else
-        value := +∞
-        for each child of node do
-            value := min(value, alpha_beta(child, depth − 1, α, β, TRUE))
-            if value ≤ α then
-                break (* α cutoff *)
-            β := min(β, value)
-        return value
+      let max_score =
+        List.fold unknowns ~init:Int.min_value
+          ~f:(fun acc p -> Int.max acc scores.(p.row).(p.column))
+      in
+      let bests = List.filter unknowns ~f:(fun p -> scores.(p.row).(p.column) = max_score) in
+      let bests =
+        match List.filter bests ~f:(fun p -> ((p.row + p.column) land 1) = 0) with
+        | [] -> bests
+        | ps -> ps
+      in
+      Core.Random.init seed;
+      List.random_element bests
 
+let choose_move_timed (state : Game_state.t) ~time_ms:_ : Move.t option =
+  match probability_move state ~seed:12345 with
+  | Some m -> Some m
+  | None ->
+    (match greedy_move state with
+     | Some m -> Some m
+     | None -> pick_random_move state ~seed:67890)
 
-alphabeta(origin, depth, −∞, +∞, TRUE)
-*)
-let rec alpha_beta (node : Game_state.t) depth alpha beta =
-  match node.decision with
-  | In_progress { whose_turn } when depth > 0 ->
-    (match whose_turn with
-     | P1 ->
-       List.fold_until
-         (children node ~sort_by_whose_turn:whose_turn)
-         ~init:(~value:Int.min_value, ~alpha)
-         ~finish:(fun (~value, ~alpha:_) -> value)
-         ~f:(fun (~value, ~alpha) child ->
-           let value = Int.max value (alpha_beta child (depth - 1) alpha beta) in
-           let alpha = Int.max alpha value in
-           if value >= beta then Stop value else Continue (~value, ~alpha))
-     | P2 ->
-       List.fold_until
-         (children node ~sort_by_whose_turn:whose_turn)
-         ~init:(~value:Int.max_value, ~beta)
-         ~finish:(fun (~value, ~beta:_) -> value)
-         ~f:(fun (~value, ~beta) child ->
-           let value = Int.min value (alpha_beta child (depth - 1) alpha beta) in
-           let beta = Int.min beta value in
-           if value <= alpha then Stop value else Continue (~value, ~beta)))
-  | _ -> heuristic_value node
-;;
+let play_with_policy (state : Game_state.t) (policy : Game_state.t -> Move.t option) =
+  match policy state with
+  | None -> state
+  | Some mv -> Option.value (Result.ok (Game_state.make_move state mv)) ~default:state
 
-let alpha_beta (node : Game_state.t) ~depth =
-  match node.decision with
-  | Winner _ -> None
-  | In_progress { whose_turn } ->
-    let moves = Game_state.get_all_moves node in
-    let moves_and_children =
-      List.filter_map moves ~f:(fun move ->
-        Game_state.make_move node move
-        |> Result.ok
-        |> Option.map ~f:(fun child -> move, child))
-    in
-    let moves_and_children_and_values =
-      List.map moves_and_children ~f:(fun (move, child) ->
-        move, child, alpha_beta child (depth - 1) Int.min_value Int.max_value)
-    in
-    let best_move =
-      (match whose_turn with
-       | P1 -> List.max_elt
-       | P2 -> List.min_elt)
-        moves_and_children_and_values
-        ~compare:(fun (_move, _child, v1) (_move, _child, v2) -> Int.compare v1 v2)
-      |> Option.map ~f:(fun (move, _child, _value) -> move)
-    in
-    best_move
-;; *)
+let simulate_one ~seed ~time_ms =
+  let rec loop st turn =
+    if Decision.is_game_over st.Game_state.decision then st
+    else
+      let st' =
+        if turn land 1 = 1
+        then play_with_policy st (fun s -> choose_move_timed s ~time_ms)
+        else play_with_policy st (fun s -> pick_random_move s ~seed:(seed + turn))
+      in
+      loop st' (turn + 1)
+  in
+  let init =
+    Game_state.create_random ~rows:10 ~cols:10 ~seed
+    |> Result.ok |> Option.value_exn
+  in
+  loop init 1
+
+let simulate_matches ~games ~seed ~time_ms =
+  let wins_ai = ref 0
+  and wins_rand = ref 0
+  and draws = ref 0 in
+  for i = 0 to games - 1 do
+    let final = simulate_one ~seed:(seed + 997*i) ~time_ms in
+    (match final.decision with
+     | Decision.Winner Player_kind.P1 -> incr wins_ai
+     | Decision.Winner Player_kind.P2 -> incr wins_rand
+     | Decision.In_progress _ -> incr draws)
+  done;
+  printf "Timed AI (P1) wins: %d / %d\n" !wins_ai games;
+  printf "Random AI (P2) wins: %d / %d\n" !wins_rand games;
+  printf "Unfinished: %d\n%!" !draws

@@ -1,190 +1,100 @@
 open! Core
 
 module Player_kind = struct
-  type t =
-    | P1
-    | P2
-  [@@deriving sexp, compare, equal]
-
-  let opposite (t : t) : t =
-    match t with
-    | P1 -> P2
-    | P2 -> P1
-  ;;
+  type t = P1 | P2 [@@deriving sexp, compare, equal]
+  let opposite = function P1 -> P2 | P2 -> P1
 end
 
 module Cell_position = struct
   module T = struct
-    type t =
-      { row : int
-      ; column : int
-      }
-    [@@deriving sexp, compare, hash]
+    type t = { row:int; column:int } [@@deriving sexp, compare, hash]
   end
-
   include T
-  include Comparable.Make (T)
+  include Comparable.Make(T)
 end
 
 module Move = Cell_position
 
 module Cell_type = struct
-  type t =
-    | Hit
-    | Miss
-    | Ship
-  [@@deriving sexp, compare, equal]
+  type t = Hit | Miss | Ship [@@deriving sexp, compare, equal]
 end
 
 module Ship = struct
-  type t =
-    { id : string
-    ; cells : Cell_position.t list
-    }
-  [@@deriving sexp, compare, equal]
+  type t = { id:string; cells:Cell_position.t list } [@@deriving sexp, compare, equal]
+end
+
+module Pos = struct
+  let make row column = { Cell_position.row=row; column }
+  let in_bounds ~rows ~cols { Cell_position.row; column } =
+    0 <= row && row < rows && 0 <= column && column < cols
+  let all_positions ~rows ~cols =
+    List.concat_map (List.init rows ~f:Fn.id) ~f:(fun r ->
+      List.map (List.init cols ~f:Fn.id) ~f:(fun c -> make r c))
 end
 
 module Board = struct
-  type t =
-    { rows : int
-    ; cols : int
-    ; ships : Ship.t list
-    ; shots : Cell_type.t Cell_position.Map.t
-    }
+  type t = { rows:int; cols:int; ships:Ship.t list; shots:Cell_type.t Cell_position.Map.t }
   [@@deriving sexp, compare, equal]
 
-  (* helpers *)
-  let ship_cells_set (ships : Ship.t list) : Cell_position.Set.t =
-    List.concat_map ships ~f:(fun s -> s.Ship.cells)
-    |> Cell_position.Set.of_list
-  ;;
-
-  let cell_has_ship (t : t) (pos : Cell_position.t) : bool =
-    let occupied = ship_cells_set t.ships in
-    Set.mem occupied pos
-  ;;
-
-  (* exposed functions *)
-  let is_legal_cell_position (t : t) ({ row; column } : Cell_position.t) : bool =
-    0 <= row && row < t.rows && 0 <= column && column < t.cols
-  ;;
-
-  let already_shot (t : t) (pos : Cell_position.t) : bool =
-    Map.mem t.shots pos
-  ;;
-
-  let all_ships_sunk (t : t) : bool =
-    let occupied = ship_cells_set t.ships in
-    Set.for_all occupied ~f:(fun pos ->
-      match Map.find t.shots pos with
-      | Some Cell_type.Hit -> true
-      | _ -> false)
-  ;;
+  let ship_cells_set ships =
+    List.concat_map ships ~f:(fun s -> s.Ship.cells) |> Cell_position.Set.of_list
+  let cell_has_ship t pos = Set.mem (ship_cells_set t.ships) pos
+  let is_legal_cell_position t p = Pos.in_bounds ~rows:t.rows ~cols:t.cols p
+  let already_shot t pos = Map.mem t.shots pos
+  let all_ships_sunk t =
+    let occ = ship_cells_set t.ships in
+    Set.for_all occ ~f:(fun pos -> match Map.find t.shots pos with Some Cell_type.Hit -> true | _ -> false)
 end
 
 module Decision = struct
-  type t =
-    | In_progress of { whose_turn : Player_kind.t }
-    | Winner of Player_kind.t
+  type t = In_progress of { whose_turn:Player_kind.t } | Winner of Player_kind.t
   [@@deriving sexp, compare, equal]
-
-  let is_game_over = function
-    | Winner _ -> true
-    | In_progress _ -> false
-  ;;
+  let is_game_over = function Winner _ -> true | In_progress _ -> false
 end
 
 module Game_state = struct
-  type t =
-    { p1_board : Board.t
-    ; p2_board : Board.t
-    ; decision : Decision.t
-    ; last_move : Move.t option
-    }
+  type t = { p1_board:Board.t; p2_board:Board.t; decision:Decision.t; last_move:Move.t option }
   [@@deriving sexp, compare, equal]
 
   module Create_error = struct
-    type t =
-      | Board_too_big_or_small
-      | Illegal_ship_cell
-      | Overlapping_ships
-    [@@deriving sexp, compare, equal]
+    type t = Board_too_big_or_small | Illegal_ship_cell | Overlapping_ships [@@deriving sexp, compare, equal, hash]
   end
 
   module Move_error = struct
-    type t =
-      | Game_is_over
-      | Already_shot
-      | Illegal_cell_position
-    [@@deriving sexp, compare, equal]
+    type t = Game_is_over | Already_shot | Illegal_cell_position [@@deriving sexp, compare, equal]
   end
 
   module Ship_rules = struct
     open Ship
-
-    let required_fleet : int String.Map.t =
-      String.Map.of_alist_exn
-        [ "destroyer", 2
-        ; "submarine", 3
-        ; "cruiser", 3
-        ; "battleship", 4
-        ; "aircraft_carrier", 5
-        ]
-
-    (* FIX: parse kind using rsplit2 (last underscore) so "aircraft_carrier_1" -> "aircraft_carrier" *)
-    let ship_kind (id : string) : string option =
-      match String.rsplit2 id ~on:'_' with
-      | Some (kind, _) -> Some kind
-      | None -> None
-
-    let ship_within_bounds ~rows ~cols (pos : Cell_position.t) : bool =
-      0 <= pos.row && pos.row < rows && 0 <= pos.column && pos.column < cols
-
-    let valid_ship_position (cells : Cell_position.t list) =
+    let required_fleet = String.Map.of_alist_exn [ "destroyer",2; "submarine",3; "cruiser",3; "battleship",4; "aircraft_carrier",5 ]
+    let ship_kind id = match String.rsplit2 id ~on:'_' with Some(k,_) -> Some k | None -> None
+    let ship_within_bounds ~rows ~cols = Pos.in_bounds ~rows ~cols
+    let valid_ship_position cells =
       match cells with
-      | [] | [_] -> true
+      | [] -> false
+      | [_] -> true
       | _ ->
-        let rows = List.map cells ~f:(fun cell -> cell.row) in
-        let cols = List.map cells ~f:(fun cell -> cell.column) in
+        let rows = List.map cells ~f:(fun c -> c.Cell_position.row) in
+        let cols = List.map cells ~f:(fun c -> c.Cell_position.column) in
         let same_row = List.for_all rows ~f:(fun r -> r = List.hd_exn rows) in
         let same_col = List.for_all cols ~f:(fun c -> c = List.hd_exn cols) in
-        if not (same_row || same_col) then false
-        else if same_row then
-          let sorted_cols = List.sort ~compare:Int.compare cols in
-          List.for_alli sorted_cols ~f:(fun i c ->
-            i = 0 || c = List.nth_exn sorted_cols (i - 1) + 1
-          )
-        else
-          let sorted_rows = List.sort ~compare:Int.compare rows in
-          List.for_alli sorted_rows ~f:(fun i r ->
-            i = 0 || r = List.nth_exn sorted_rows (i - 1) + 1
-          )
-
-    let no_overlaps (ships : t list) =
-      let module S = Set.Make (struct
-        type t = Cell_position.t [@@deriving compare, sexp]
-      end)
-      in
-      let rec go ss seen =
-        match ss with
-        | [] -> true
-        | ship :: t1 ->
-          let cells = ship.cells in
-          let has_dupe = List.exists cells ~f:(fun p -> Set.mem seen p) in
-          if has_dupe then false
-          else
-            let seen' = List.fold cells ~init:seen ~f:(fun acc p -> Set.add acc p) in
-            go t1 seen'
-      in
-      go ships S.empty
-
-    let validate_fleet ~rows ~cols (ships : t list) : Create_error.t list =
-      let errors = ref [] in
+        let consecutive ints =
+          let mn = List.min_elt ints ~compare:Int.compare |> Option.value_exn in
+          let mx = List.max_elt ints ~compare:Int.compare |> Option.value_exn in
+          mx - mn + 1 = List.length ints &&
+          List.length (List.dedup_and_sort ~compare:Int.compare ints) = List.length ints
+        in
+        (same_row && consecutive cols) || (same_col && consecutive rows)
+    let no_overlaps ships =
+      let all = List.concat_map ships ~f:(fun s -> s.cells) in
+      Set.length (Cell_position.Set.of_list all) = List.length all
+    let validate_fleet ~rows ~cols ships =
+      let errors = Hash_set.create (module Create_error) in
       let kind_counts = String.Table.create () in
       let per_ship_ok =
         List.for_all ships ~f:(fun s ->
           let cells = s.cells in
-          let ok_non_empty = not (List.is_empty cells) in
+          let ok_non_empty = not(List.is_empty cells) in
           let ok_bounds = List.for_all cells ~f:(ship_within_bounds ~rows ~cols) in
           let ok_positions = valid_ship_position cells in
           let ok_kind_len =
@@ -193,103 +103,95 @@ module Game_state = struct
             | Some k ->
               (match Map.find required_fleet k with
                | None -> false
-               | Some required_len ->
+               | Some req ->
                  let len = List.length cells in
-                 Hashtbl.set kind_counts ~key:k
-                   ~data:(1 + Option.value (Hashtbl.find kind_counts k) ~default:0);
-                 len = required_len)
+                 Hashtbl.set kind_counts ~key:k ~data:(1+Option.value(Hashtbl.find kind_counts k)~default:0);
+                 len=req)
           in
           if ok_non_empty && ok_bounds && ok_positions && ok_kind_len then true
-          else (errors := Create_error.Illegal_ship_cell :: !errors; false))
+          else (Hash_set.add errors Create_error.Illegal_ship_cell; false))
       in
       ignore per_ship_ok;
-      if not (no_overlaps ships) then
-        errors := Create_error.Overlapping_ships :: !errors;
-      Map.iter_keys required_fleet ~f:(fun kind ->
-        match Hashtbl.find kind_counts kind with
-        | Some 1 -> ()
-        | _ -> errors := Create_error.Illegal_ship_cell :: !errors);
-      !errors
+      if not(no_overlaps ships) then Hash_set.add errors Create_error.Overlapping_ships;
+      Map.iter_keys required_fleet ~f:(fun k -> match Hashtbl.find kind_counts k with Some 1 -> () | _ -> Hash_set.add errors Create_error.Illegal_ship_cell);
+      Hash_set.to_list errors
   end
 
-  let validate_board (b : Board.t) : Create_error.t list =
-    Ship_rules.validate_fleet ~rows:b.rows ~cols:b.cols b.ships
-  ;;
+  let validate_board b = Ship_rules.validate_fleet ~rows:b.Board.rows ~cols:b.Board.cols b.Board.ships
+  let make_board ~rows ~cols ~ships = { Board.rows; cols; ships; shots=Map.empty(module Cell_position) }
 
-  let create ~rows ~cols ~p1_ships ~p2_ships : (t, Create_error.t list) Result.t =
-    let size_ok = rows = 10 && cols = 10 in
-    if not size_ok then Error [ Create_error.Board_too_big_or_small ] else
-    let p1_board =
-      { Board.rows; Board.cols; ships = p1_ships; shots = Map.empty (module Cell_position) }
-    in
-    let p2_board =
-      { Board.rows; Board.cols; ships = p2_ships; shots = Map.empty (module Cell_position) }
-    in
+  let create ~rows ~cols ~p1_ships ~p2_ships =
+    if rows<>10 || cols<>10 then Error [Create_error.Board_too_big_or_small] else
+    let p1_board = make_board ~rows ~cols ~ships:p1_ships in
+    let p2_board = make_board ~rows ~cols ~ships:p2_ships in
     let errs = validate_board p1_board @ validate_board p2_board in
-    if List.is_empty errs then
-      Ok { p1_board
-         ; p2_board
-         ; decision = In_progress { whose_turn = P1 }
-         ; last_move = None
-         }
-    else
-      Error errs
-  ;;
+    if List.is_empty errs then Ok {p1_board; p2_board; decision=In_progress{whose_turn=P1}; last_move=None}
+    else Error errs
 
-  (* Apply a single shot *)
-  let apply_shot (board : Board.t) (pos : Cell_position.t)
-    : (Board.t * bool, Move_error.t) Result.t =
-    if not (Board.is_legal_cell_position board pos)
-    then Error Move_error.Illegal_cell_position
-    else if Board.already_shot board pos
-    then Error Move_error.Already_shot
+  let cells_from_start ~start ~len ~horizontal =
+    List.init len ~f:(fun i -> if horizontal then {Cell_position.row=start.Cell_position.row; column=start.Cell_position.column+i}
+                               else {Cell_position.row=start.Cell_position.row+i; column=start.Cell_position.column})
+  let can_place_on_board ~rows ~cols ~existing cells =
+    List.for_all cells ~f:(Pos.in_bounds ~rows ~cols) &&
+    let occ = List.concat_map existing ~f:(fun s -> s.Ship.cells) |> Cell_position.Set.of_list in
+    List.for_all cells ~f:(fun p -> not(Set.mem occ p))
+  let fleet_spec = [ "destroyer",2; "submarine",3; "cruiser",3; "battleship",4; "aircraft_carrier",5 ]
+
+  let rec random_fleet ~rows ~cols ~player ~seed =
+    Core.Random.init seed;
+    let suffix = match player with Player_kind.P1->"1" | P2->"2" in
+    let rec place_all acc = function
+      | [] -> acc
+      | (kind,len)::tl ->
+        let rec try_k k =
+          if k=0 then acc else
+          let horiz = Core.Random.bool() in
+          let max_row = if horiz then rows else rows-len+1 in
+          let max_col = if horiz then cols-len+1 else cols in
+          let start = {Cell_position.row=Core.Random.int max_row; column=Core.Random.int max_col} in
+          let cells = cells_from_start ~start ~len ~horizontal:horiz in
+          if can_place_on_board ~rows ~cols ~existing:acc cells
+          then place_all ({Ship.id=kind^"_"^suffix; cells}::acc) tl
+          else try_k(k-1)
+        in try_k 500
+    in
+    let ships = place_all [] fleet_spec in
+    match Ship_rules.validate_fleet ~rows ~cols ships with []->ships | _->random_fleet ~rows ~cols ~player ~seed:(seed+1)
+
+  let create_random ~rows ~cols ~seed =
+    let p1 = random_fleet ~rows ~cols ~player:Player_kind.P1 ~seed in
+    let p2 = random_fleet ~rows ~cols ~player:Player_kind.P2 ~seed:(seed+137) in
+    create ~rows ~cols ~p1_ships:p1 ~p2_ships:p2
+
+  let apply_shot board pos =
+    if not(Board.is_legal_cell_position board pos) then Error Move_error.Illegal_cell_position
+    else if Board.already_shot board pos then Error Move_error.Already_shot
     else
       let hit = Board.cell_has_ship board pos in
       let cell_type = if hit then Cell_type.Hit else Cell_type.Miss in
       let shots' = Map.set board.shots ~key:pos ~data:cell_type in
-      Ok ({ board with shots = shots' }, hit)
-  ;;
+      Ok({board with shots=shots'},hit)
 
-  (* make_move *)
-  let make_move (t : t) (pos : Move.t) : (t, Move_error.t) Result.t =
+  let make_move t pos =
     match t.decision with
     | Winner _ -> Error Move_error.Game_is_over
-    | In_progress { whose_turn } ->
+    | In_progress{whose_turn} ->
       let shooting_at_p2 = Player_kind.equal whose_turn Player_kind.P1 in
-      let target_board = if shooting_at_p2 then t.p2_board else t.p1_board in
-      match apply_shot target_board pos with
+      let target = if shooting_at_p2 then t.p2_board else t.p1_board in
+      match apply_shot target pos with
       | Error e -> Error e
-      | Ok (target_board', _hit) ->
-        let p1_board', p2_board' =
-          if shooting_at_p2 then t.p1_board, target_board' else target_board', t.p2_board
-        in
-        let opponent_after = if shooting_at_p2 then p2_board' else p1_board' in
-        let decision' =
-          if Board.all_ships_sunk opponent_after
-          then Decision.Winner whose_turn
-          else Decision.In_progress { whose_turn = Player_kind.opposite whose_turn }
-        in
-        Ok { p1_board = p1_board'
-           ; p2_board = p2_board'
-           ; decision = decision'
-           ; last_move = Some pos
-           }
-  ;;
+      | Ok(target',_) ->
+        let p1',p2' = if shooting_at_p2 then t.p1_board,target' else target',t.p2_board in
+        let opp_after = if shooting_at_p2 then p2' else p1' in
+        let decision' = if Board.all_ships_sunk opp_after then Decision.Winner whose_turn
+                        else In_progress{whose_turn=Player_kind.opposite whose_turn} in
+        Ok{p1_board=p1'; p2_board=p2'; decision=decision'; last_move=Some pos}
 
-  (* get_all_moves *)
-  let get_all_moves (t : t) : Move.t list =
+  let get_all_moves t =
     match t.decision with
     | Decision.Winner _ -> []
-    | Decision.In_progress { whose_turn } ->
-      let target =
-        if Player_kind.equal whose_turn Player_kind.P1
-        then t.p2_board else t.p1_board
-      in
-      let positions =
-        List.concat_map (List.init target.rows ~f:Fn.id) ~f:(fun r ->
-          List.map (List.init target.cols ~f:Fn.id) ~f:(fun c ->
-            { Cell_position.row = r; column = c }))
-      in
-      List.filter positions ~f:(fun pos -> not (Board.already_shot target pos))
-  ;;
+    | In_progress{whose_turn} ->
+      let target = if Player_kind.equal whose_turn Player_kind.P1 then t.p2_board else t.p1_board in
+      Pos.all_positions ~rows:target.rows ~cols:target.cols
+      |> List.filter ~f:(fun pos -> not(Board.already_shot target pos))
 end

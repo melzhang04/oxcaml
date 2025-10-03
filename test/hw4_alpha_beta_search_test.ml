@@ -1,332 +1,392 @@
-(* open! Core
+open! Core
 open Battleship_logic_library
 open Hw2_battleship_logic
-open Hw4_alpha_beta_search
-open Hw3_battleship_logic_test
+module AB = Battleship_logic_library.Hw4_alpha_beta_search
 
-type player_kind_or_empty =
-  | E
-  | P1
-  | P2
+let ok_exn r = Result.ok r |> Option.value_exn
 
-let print_computer_move (board_as_lists : player_kind_or_empty list list) max_depth =
-  let board : Player_kind.t Cell_position.Map.t =
-    List.mapi board_as_lists ~f:(fun row row_as_list ->
-      List.filter_mapi row_as_list ~f:(fun col player_kind_or_empty ->
-        let player_kind : Player_kind.t option =
-          match player_kind_or_empty with
-          | E -> None
-          | P1 -> Some P1
-          | P2 -> Some P2
-        in
-        Option.map player_kind ~f:(fun player_kind : (Cell_position.t * Player_kind.t) ->
-          { row; column = col }, player_kind)))
-    |> List.concat
-    |> Cell_position.Map.of_alist_exn
+let init_random () =
+  Game_state.create_random ~rows:10 ~cols:10 ~seed:7 |> ok_exn
+
+let row_separator cols = String.init (2 * cols - 1) ~f:(fun _ -> '-')
+
+let cell_str = function
+  | Some Cell_type.Hit -> "H"
+  | Some Cell_type.Miss -> "M"
+  | Some Cell_type.Ship -> "S"
+  | None -> " "
+
+let print_board (b : Board.t) =
+  let sep = row_separator b.cols in
+  for r = 0 to b.rows - 1 do
+    List.init b.cols ~f:(fun c ->
+      let pos = { Cell_position.row = r; column = c } in
+      cell_str (Map.find b.shots pos))
+    |> String.concat ~sep:"|"
+    |> print_endline;
+    if r < b.rows - 1 then print_endline sep
+  done
+
+let print_turn (state : Game_state.t) =
+  match state.decision with
+  | Decision.In_progress { whose_turn = Player_kind.P1 } ->
+      print_endline "P2 board (shots by P1):";
+      print_board state.p2_board
+  | Decision.In_progress { whose_turn = Player_kind.P2 } ->
+      print_endline "P1 board (shots by P2):";
+      print_board state.p1_board
+  | Decision.Winner _ ->
+      print_endline "Final boards:";
+      print_endline "P2 board (shots by P1):"; print_board state.p2_board;
+      print_endline "P1 board (shots by P2):"; print_board state.p1_board
+
+let%test "timed AI picks a legal move on a fresh random game" =
+  let s = init_random () in
+  match AB.choose_move_timed s ~time_ms:10 with
+  | None -> false
+  | Some mv ->
+    (match s.decision with
+     | Decision.In_progress { whose_turn = Player_kind.P1 } ->
+       Board.is_legal_cell_position s.p2_board mv
+       && not (Board.already_shot s.p2_board mv)
+     | Decision.In_progress { whose_turn = Player_kind.P2 } ->
+       Board.is_legal_cell_position s.p1_board mv
+       && not (Board.already_shot s.p1_board mv)
+     | Decision.Winner _ -> false)
+
+let%test "greedy AI picks a legal move" =
+  let s = init_random () in
+  match AB.greedy_move s with
+  | None -> false
+  | Some mv ->
+    (match s.decision with
+     | Decision.In_progress { whose_turn = Player_kind.P1 } ->
+       Board.is_legal_cell_position s.p2_board mv
+       && not (Board.already_shot s.p2_board mv)
+     | Decision.In_progress { whose_turn = Player_kind.P2 } ->
+       Board.is_legal_cell_position s.p1_board mv
+       && not (Board.already_shot s.p1_board mv)
+     | Decision.Winner _ -> false)
+
+let%test "random AI picks a legal move" =
+  let s = init_random () in
+  match AB.pick_random_move s ~seed:123 with
+  | None -> false
+  | Some mv ->
+    (match s.decision with
+     | Decision.In_progress { whose_turn = Player_kind.P1 } ->
+       Board.is_legal_cell_position s.p2_board mv
+       && not (Board.already_shot s.p2_board mv)
+     | Decision.In_progress { whose_turn = Player_kind.P2 } ->
+       Board.is_legal_cell_position s.p1_board mv
+       && not (Board.already_shot s.p1_board mv)
+     | Decision.Winner _ -> false)
+
+let%expect_test "timed vs random: print first 10 turns and last turns" =
+  let rec loop state turn =
+    if Decision.is_game_over state.Game_state.decision then (
+      print_endline (Printf.sprintf "\nFinal turn %d:" turn);
+      print_s [%sexp (state.decision : Decision.t)];
+      print_turn state;
+      state
+    ) else (
+      let state' =
+        match state.decision with
+        | Decision.In_progress { whose_turn = Player_kind.P1 } ->
+          let mv = AB.choose_move_timed state ~time_ms:10 |> Option.value_exn in
+          Game_state.make_move state mv |> ok_exn
+        | Decision.In_progress { whose_turn = Player_kind.P2 } ->
+          AB.play_random state ~seed:turn
+        | Decision.Winner _ -> state
+      in
+      if turn <= 10 then (
+        print_endline (Printf.sprintf "\nAfter turn %d:" turn);
+        print_s [%sexp (state'.decision : Decision.t)];
+        print_turn state'
+      );
+      loop state' (turn + 1))
   in
-  let whose_turn : Player_kind.t = if Map.length board mod 2 = 0 then X else O in
-  let state : Game_state.t =
-    { board
-    ; rows = 3
-    ; columns = 3
-    ; winning_sequence_length = 3
-    ; decision = In_progress { whose_turn }
-    ; last_move = None
-    }
-  in
-  let move = alpha_beta state ~depth:max_depth |> Option.value_exn in
-  let next_state = Game_state.make_move state move |> ok_exn in
-  print_s [%message "Computer chooses this move" (move : Move.t)];
-  print_endline "\nThis transitions the game from this state:";
-  pretty_print_board state;
-  print_endline "\nTo this state:";
-  pretty_print_board next_state
-;;
+  let s = init_random () in
+  let _ = loop s 1 in
+  ();
+  [%expect {|
+    After turn 1:
+    (In_progress (whose_turn P2))
+    P1 board (shots by P2):
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
 
-let%expect_test "returns exactly one cell" =
-  print_computer_move [ [ O; O; X ]; [ X; X; O ]; [ O; X; E ] ] 1;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 2) (column 2))))
+    After turn 2:
+    (In_progress (whose_turn P1))
+    P2 board (shots by P1):
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | |M| | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
 
-    This transitions the game from this state:
-    O|O|X
-    -----
-    X|X|O
-    -----
-    O|X|
-    (In_progress (whose_turn X))
+    After turn 3:
+    (In_progress (whose_turn P2))
+    P1 board (shots by P2):
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |M
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
 
-    To this state:
-    O|O|X
-    -----
-    X|X|O
-    -----
-    O|X|X
-    Stalemate
-    |}]
-;;
+    After turn 4:
+    (In_progress (whose_turn P1))
+    P2 board (shots by P1):
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | |M| | | | |
+    -------------------
+     | | | | |M| | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
 
-let%expect_test "X finds an immediate winning move" =
-  print_computer_move [ [ E; E; O ]; [ O; X; X ]; [ E; X; O ] ] 1;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 0) (column 1))))
+    After turn 5:
+    (In_progress (whose_turn P2))
+    P1 board (shots by P2):
+     | | | | | | | | |
+    -------------------
+     | |M| | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |M
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
 
-    This transitions the game from this state:
-     | |O
-    -----
-    O|X|X
-    -----
-     |X|O
-    (In_progress (whose_turn X))
+    After turn 6:
+    (In_progress (whose_turn P1))
+    P2 board (shots by P1):
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | |H| | | | | |
+    -------------------
+     | | | |M| | | | |
+    -------------------
+     | | | | |M| | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
 
-    To this state:
-     |X|O
-    -----
-    O|X|X
-    -----
-     |X|O
-    (Winner X)
-    |}]
-;;
+    After turn 7:
+    (In_progress (whose_turn P2))
+    P1 board (shots by P2):
+     | | | | | | | | |
+    -------------------
+     | |M| | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |M
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | |M| | | |
+    -------------------
+     | | | | | | | | |
 
-let%expect_test "O finds an immediate winning move" =
-  print_computer_move [ [ E; E; O ]; [ O; X; X ]; [ O; X; O ] ] 1;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 0) (column 0))))
+    After turn 8:
+    (In_progress (whose_turn P1))
+    P2 board (shots by P1):
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | |H| | | | | |
+    -------------------
+     | | |H| | | | | |
+    -------------------
+     | | | |M| | | | |
+    -------------------
+     | | | | |M| | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
 
-    This transitions the game from this state:
-     | |O
-    -----
-    O|X|X
-    -----
-    O|X|O
-    (In_progress (whose_turn O))
+    After turn 9:
+    (In_progress (whose_turn P2))
+    P1 board (shots by P2):
+     | | | | | | | | |
+    -------------------
+     | |M| | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | |M| | |M
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | |M| | | |
+    -------------------
+     | | | | | | | | |
 
-    To this state:
-    O| |O
-    -----
-    O|X|X
-    -----
-    O|X|O
-    (Winner O)
-    |}]
-;;
+    After turn 10:
+    (In_progress (whose_turn P1))
+    P2 board (shots by P1):
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | |H| | | | | |
+    -------------------
+     | | |H| | | | | |
+    -------------------
+     | | |H|M| | | | |
+    -------------------
+     | | | | |M| | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
 
-let%expect_test "X prevents an immediate win" =
-  print_computer_move [ [ X; E; E ]; [ O; O; E ]; [ X; E; E ] ] 2;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 1) (column 2))))
+    Final turn 192:
+    (Winner P1)
+    Final boards:
+    P2 board (shots by P1):
+    M|M|M| |M|M|M|M|M|M
+    -------------------
+    H|H|M|M| |M|M|M|M|M
+    -------------------
+    M|M|M|H|M|M|H|M|M|
+    -------------------
+    M|M|M|H|M|M|H|M|M|M
+    -------------------
+    M|M|M|H|M|M|H|M|M|M
+    -------------------
+    M|M|M|H|M|M|M|M|M|M
+    -------------------
+    M|M|M|H|M|H|M|M|M|M
+    -------------------
+    M|M| |M|M|H|M|M|M|H
+    -------------------
+    M|M|M|M|M|H|M|M|M|H
+    -------------------
+    M|M|M|M|M|H|M|M|M|H
+    P1 board (shots by P2):
+    M|M|M|M|M|M|H|H|H|M
+    -------------------
+    M|M|M| |M|M|M|M|M|M
+    -------------------
+    M|M|M|M|M|M|M|M|M|M
+    -------------------
+    M|M|M|M|M|M|M|M|M|M
+    -------------------
+     |M|H|M|M|M|M|H|H|H
+    -------------------
+    M|M|H|H|M|M|M|H|M|M
+    -------------------
+    M|M|H|H|M|M|M|H|M|M
+    -------------------
+    M| |M|H|M|M|M| |M|M
+    -------------------
+    M|M|M|H|M|M|M|H|M|M
+    -------------------
+    M|M|M| |M|M|M|M|M|M |}]
 
-    This transitions the game from this state:
-    X| |
-    -----
-    O|O|
-    -----
-    X| |
-    (In_progress (whose_turn X))
-
-    To this state:
-    X| |
-    -----
-    O|O|X
-    -----
-    X| |
-    (In_progress (whose_turn O))
-    |}]
-;;
-
-let%expect_test "O prevents an immediate win" =
-  print_computer_move [ [ X; X; E ]; [ O; E; E ]; [ E; E; E ] ] 2;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 0) (column 2))))
-
-    This transitions the game from this state:
-    X|X|
-    -----
-    O| |
-    -----
-     | |
-    (In_progress (whose_turn O))
-
-    To this state:
-    X|X|O
-    -----
-    O| |
-    -----
-     | |
-    (In_progress (whose_turn X))
-    |}]
-;;
-
-let%expect_test "O prevents another immediate win" =
-  print_computer_move [ [ X; O; E ]; [ X; O; E ]; [ E; X; E ] ] 2;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 2) (column 0))))
-
-    This transitions the game from this state:
-    X|O|
-    -----
-    X|O|
-    -----
-     |X|
-    (In_progress (whose_turn O))
-
-    To this state:
-    X|O|
-    -----
-    X|O|
-    -----
-    O|X|
-    (In_progress (whose_turn X))
-    |}]
-;;
-
-let%expect_test "X finds a winning move that will lead to winning in 2 steps" =
-  print_computer_move [ [ X; E; E ]; [ O; X; E ]; [ E; E; O ] ] 3;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 0) (column 1))))
-
-    This transitions the game from this state:
-    X| |
-    -----
-    O|X|
-    -----
-     | |O
-    (In_progress (whose_turn X))
-
-    To this state:
-    X|X|
-    -----
-    O|X|
-    -----
-     | |O
-    (In_progress (whose_turn O))
-    |}]
-;;
-
-let%expect_test "O finds a winning move that will lead to winning in 2 steps" =
-  print_computer_move [ [ E; X; E ]; [ X; X; O ]; [ E; O; E ] ] 3;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 2) (column 2))))
-
-    This transitions the game from this state:
-     |X|
-    -----
-    X|X|O
-    -----
-     |O|
-    (In_progress (whose_turn O))
-
-    To this state:
-     |X|
-    -----
-    X|X|O
-    -----
-     |O|O
-    (In_progress (whose_turn X))
-    |}]
-;;
-
-let%expect_test "O finds a cool winning move that will lead to winning in 2 steps" =
-  print_computer_move [ [ X; O; X ]; [ X; E; E ]; [ O; E; E ] ] 3;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 2) (column 1))))
-
-    This transitions the game from this state:
-    X|O|X
-    -----
-    X| |
-    -----
-    O| |
-    (In_progress (whose_turn O))
-
-    To this state:
-    X|O|X
-    -----
-    X| |
-    -----
-    O|O|
-    (In_progress (whose_turn X))
-    |}]
-;;
-
-let%expect_test "O finds the wrong move due to small depth" =
-  print_computer_move [ [ X; E; E ]; [ E; E; E ]; [ E; E; E ] ] 3;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 0) (column 1))))
-
-    This transitions the game from this state:
-    X| |
-    -----
-     | |
-    -----
-     | |
-    (In_progress (whose_turn O))
-
-    To this state:
-    X|O|
-    -----
-     | |
-    -----
-     | |
-    (In_progress (whose_turn X))
-    |}]
-;;
-
-let%expect_test "O finds the correct move when depth is big enough" =
-  print_computer_move [ [ X; E; E ]; [ E; E; E ]; [ E; E; E ] ] 6;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 1) (column 1))))
-
-    This transitions the game from this state:
-    X| |
-    -----
-     | |
-    -----
-     | |
-    (In_progress (whose_turn O))
-
-    To this state:
-    X| |
-    -----
-     |O|
-    -----
-     | |
-    (In_progress (whose_turn X))
-    |}]
-;;
-
-let%expect_test "X finds a winning move that will lead to winning in 2 steps" =
-  print_computer_move [ [ E; E; E ]; [ O; X; E ]; [ E; E; E ] ] 5;
-  [%expect
-    {|
-    ("Computer chooses this move" (move ((row 0) (column 0))))
-
-    This transitions the game from this state:
-     | |
-    -----
-    O|X|
-    -----
-     | |
-    (In_progress (whose_turn X))
-
-    To this state:
-    X| |
-    -----
-    O|X|
-    -----
-     | |
-    (In_progress (whose_turn O))
-    |}]
-;; *)
+let%expect_test "timed AI vs random over 50 games (2s per move)" =
+  AB.simulate_matches ~games:50 ~seed:42 ~time_ms:50;
+  [%expect {|
+    Timed AI (P1) wins: 45 / 50
+    Random AI (P2) wins: 5 / 50
+    Unfinished: 0 |}]
