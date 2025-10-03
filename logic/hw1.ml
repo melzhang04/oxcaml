@@ -23,7 +23,7 @@ type decision =
   | Winner of player_kind
 
 type ship =
-  { id : int
+  { id : string
   ; cells : cell_position list
   }
 
@@ -89,7 +89,7 @@ P2 (10x10, ships placed)
 
 let initial_state : game_state =
   let p1_ships =
-    [ { id = 1
+    [ { id = "aircraft_carrier_1"
       ; cells =
           [ { row = 1; column = 1 }
           ; { row = 1; column = 2 }
@@ -98,7 +98,7 @@ let initial_state : game_state =
           ; { row = 1; column = 5 }
           ]
       }
-    ; { id = 2
+    ; { id = "battleship_1"
       ; cells =
           [ { row = 0; column = 8 }
           ; { row = 1; column = 8 }
@@ -106,19 +106,22 @@ let initial_state : game_state =
           ; { row = 3; column = 8 }
           ]
       }
-    ; { id = 3
+    ; { id = "submarine_1"
       ; cells =
           [ { row = 5; column = 0 }; { row = 5; column = 1 }; { row = 5; column = 2 } ]
       }
-    ; { id = 4
+    ; { id = "cruiser_1"
       ; cells =
           [ { row = 6; column = 4 }; { row = 7; column = 4 }; { row = 8; column = 4 } ]
       }
-    ; { id = 5; cells = [ { row = 9; column = 7 }; { row = 9; column = 8 } ] }
+    ; { id = "destroyer_1"
+      ; cells =
+          [ { row = 9; column = 7 }; { row = 9; column = 8 } ]
+      }
     ]
   in
   let p2_ships =
-    [ { id = 101
+    [ { id = "aircraft_carrier_2"
       ; cells =
           [ { row = 0; column = 0 }
           ; { row = 0; column = 1 }
@@ -127,7 +130,7 @@ let initial_state : game_state =
           ; { row = 0; column = 4 }
           ]
       }
-    ; { id = 102
+    ; { id = "battleship_2"
       ; cells =
           [ { row = 2; column = 3 }
           ; { row = 3; column = 3 }
@@ -135,15 +138,15 @@ let initial_state : game_state =
           ; { row = 5; column = 3 }
           ]
       }
-    ; { id = 103
+    ; { id = "submarine_2"
       ; cells =
           [ { row = 6; column = 5 }; { row = 6; column = 6 }; { row = 6; column = 7 } ]
       }
-    ; { id = 104
+    ; { id = "cruiser_2"
       ; cells =
           [ { row = 1; column = 9 }; { row = 2; column = 9 }; { row = 3; column = 9 } ]
       }
-    ; { id = 105; cells = [ { row = 8; column = 2 }; { row = 8; column = 3 } ] }
+    ; { id = "destroyer_2"; cells = [ { row = 8; column = 2 }; { row = 8; column = 3 } ] }
     ]
   in
   { p1_board = { rows = 10; cols = 10; ships = p1_ships; shots = [] }

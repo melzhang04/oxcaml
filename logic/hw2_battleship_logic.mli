@@ -31,7 +31,7 @@ end
 
 module Ship : sig
   type t =
-    { id : int
+    { id : string
     ; cells : Cell_position.t list
     }
   [@@deriving sexp, compare, equal]
@@ -72,7 +72,7 @@ module Game_state : sig
   module Move_error : sig
     type t =
       | Game_is_over
-      | Space_already_shot
+      | Already_shot
       | Illegal_cell_position
     [@@deriving sexp, compare, equal]
   end
@@ -80,7 +80,6 @@ module Game_state : sig
   type t =
     { p1_board : Board.t
     ; p2_board : Board.t
-    ; columns : int
     ; decision : Decision.t
     ; last_move : Move.t option
     }

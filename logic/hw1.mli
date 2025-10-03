@@ -23,7 +23,7 @@ type decision =
   | Winner of player_kind
 
 type ship =
-  { id : int
+  { id : string
   ; cells : cell_position list
   }
 
