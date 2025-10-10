@@ -16,7 +16,7 @@ let o_mark =
     ~this_html_is_sanitized_and_is_totally_safe_trust_me:
       "<circle cx='50' cy='50' r='27' stroke='blue' stroke-width='5' fill='white' />"
     ()
-;;
+;;  
 
 let x_mark =
   Vdom.Node.inner_html_svg

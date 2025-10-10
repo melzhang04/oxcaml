@@ -24,12 +24,12 @@ module Ship = struct
 end
 
 module Pos = struct
-  let make row column = { Cell_position.row=row; column }
   let in_bounds ~rows ~cols { Cell_position.row; column } =
     0 <= row && row < rows && 0 <= column && column < cols
   let all_positions ~rows ~cols =
-    List.concat_map (List.init rows ~f:Fn.id) ~f:(fun r ->
-      List.map (List.init cols ~f:Fn.id) ~f:(fun c -> make r c))
+    List.cartesian_product
+      (List.init rows ~f:Fn.id)
+      (List.init cols ~f:Fn.id)
 end
 
 module Board = struct
@@ -193,5 +193,6 @@ module Game_state = struct
     | In_progress{whose_turn} ->
       let target = if Player_kind.equal whose_turn Player_kind.P1 then t.p2_board else t.p1_board in
       Pos.all_positions ~rows:target.rows ~cols:target.cols
+      |> List.map ~f:(fun (row, col) -> { Cell_position.row = row; column = col })
       |> List.filter ~f:(fun pos -> not(Board.already_shot target pos))
 end
