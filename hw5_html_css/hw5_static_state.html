@@ -1,189 +1,82 @@
 <!DOCTYPE html>
-<html ng-app="myApp">
-
+<html>
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8" />
   <title>Battleship</title>
-  <meta name="description" content="Battleship game">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <link rel="stylesheet" type="text/css" href="hw5_static_state.css">
-  <link rel="icon" href="data:,">
+  <meta name="description" content="Battleship game" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <link rel="stylesheet" href="hw5_html_css/hw5_static_state.css" />
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee+Tint&display=swap" rel="stylesheet">
+  <script defer src="generated_js/battleship_ui.bc.js"></script>
 </head>
-
 <body>
-  <div class="game">
-    <div class="labels-top">
-      <div class="label" style="left: var(--padL); right: var(--padR); text-align: center;">
-        <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
+  <div class="header">
+    <h1 class="bungee-tint-regular">Battleship</h1>
+  </div>
+  <!-- === My Board === -->
+  <div class="board-wrapper">
+    <div class="board-title">My Board</div>
+    <div class="game">
+      <div class="labels-top">
+        <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
+        <span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
+      </div>
+      <div class="labels-left">
+        <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+        <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
+      </div>
+      <div class="board">
+        <div class="playfield">
+          <div class="grid"></div>
+
+          <!-- Ships -->
+          <div class="ship" style="--x:0; --y:0; --w:5; --h:1;">
+            <img src="hw5_html_css/Aircraft_Carrier.svg" alt="Carrier" />
+          </div>
+          <div class="ship" style="--x:2; --y:2; --w:4; --h:1;">
+            <img src="hw5_html_css/Battleship.svg" alt="Battleship" />
+          </div>
+          <div class="ship" style="--x:5; --y:4; --w:3; --h:1;">
+            <img src="hw5_html_css/Cruiser.svg" alt="Cruiser" />
+          </div>
+          <div class="ship" style="--x:7; --y:6; --w:3; --h:1; --rotate:90deg;">
+            <img src="hw5_html_css/Submarine.svg" alt="Submarine" />
+          </div>
+          <div class="ship" style="--x:0; --y:9; --w:2; --h:1;">
+            <img src="hw5_html_css/Destroyer.svg" alt="Destroyer" />
+          </div>
+        </div>
       </div>
     </div>
+  </div>
 
-    <div class="labels-left">
-      <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div>
-      <div>6</div><div>7</div><div>8</div><div>9</div><div>10</div>
-    </div>
-
-    <div class="board">
-      <div class="playfield">
-        <div class="grid"></div>
-
-        <div class="row" style="top:0%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:10%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div the="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:20%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:30%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:40%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:50%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:60%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:70%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:80%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-        <div class="row" style="top:90%;">
-          <div class="column cell" style="left:0%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:10%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:20%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:30%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:40%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:50%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:60%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:70%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:80%;"><div class="socket"></div></div>
-          <div class="column cell" style="left:90%;"><div class="socket"></div></div>
-        </div>
-
-      </div> <!-- /playfield -->
-      <div class="ship" style="--x:1; --y:6; --w:5; --h:1;">
-          <img src="Aircraft Carrier.svg" alt="Carrier">
-        </div>
-
-        <div class="ship" style="--x:3; --y:2; --w:4; --h:1;">
-          <img src="Battleship.svg" alt="Battleship">
-        </div>
-
-        <div class="ship" style="--x:6; --y:4; --w:3; --h:1;">
-          <img src="Cruiser.svg" alt="Cruiser">
-        </div>
-
-        <div class="ship" style="--x:8; --y:1; --w:1; --h:3; --rotate:90deg;">
-          <img src="Submarine.svg" alt="Submarine">
-        </div>
-
-        <div class="ship" style="--x:0; --y:9; --w:2; --h:1;">
-          <img src="Destroyer.svg" alt="Destroyer">
-        </div>
-
-        <div class="marker hit"  style="--x:3; --y:3;"></div>
-        <div class="marker miss" style="--x:7; --y:1;"></div>
+  <!-- === Opponent’s Board === -->
+  <div class="board-wrapper">
+    <div class="board-title">Opponent’s Board</div>
+    <div class="game">
+      <div class="labels-top">
+        <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
+        <span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
       </div>
+      <div class="labels-left">
+        <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+        <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
+      </div>
+      <div class="board">
+        <div class="playfield">
+          <div class="grid"></div>
 
-      <div class="gloss"></div>
-    </div> <!-- /board -->
-  </div> <!-- /game -->
+          <!-- Example hit/miss markers -->
+          <div class="marker hit" style="left:calc(3 * 10%); top:calc(2 * 10%);"></div>
+          <div class="marker hit" style="left:calc(4 * 10%); top:calc(2 * 10%);"></div>
+          <div class="marker miss" style="left:calc(6 * 10%); top:calc(7 * 10%);"></div>
+          <div class="marker miss" style="left:calc(1 * 10%); top:calc(9 * 10%);"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

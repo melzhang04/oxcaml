@@ -48,6 +48,7 @@ module Board : sig
     }
   [@@deriving sexp, compare, equal]
 
+  val cell_has_ship : t -> Cell_position.t -> bool
   val is_legal_cell_position : t -> Cell_position.t -> bool
   val all_ships_sunk : t -> bool
   val already_shot : t -> Cell_position.t -> bool
