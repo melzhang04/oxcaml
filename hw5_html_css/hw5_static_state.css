@@ -17,6 +17,14 @@ body {
   align-items: center;
 }
 
+.turn-indicator {
+  text-align: center;
+  font-weight: 600;
+  font-size: min(3.5vmin, 18px);
+  color: #1f3649;
+  margin-bottom: 1vmin;
+}
+
 .bungee-tint-regular {
   font-family: "Bungee Tint", sans-serif;
   font-weight: 500;
@@ -29,10 +37,20 @@ body {
   letter-spacing: 0.05em;
 }
 
+.boards-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 5vmin;
+}
+
 .board-wrapper {
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 6vmin;
+  flex-wrap: wrap;
 }
 
 .board-title {
@@ -58,7 +76,6 @@ body {
   --padR: 7%;
   --padB: 7%;
   --pf-pad: 1.5%;
-  --socket-d: 60%;
 }
 
 /* ===== Labels ===== */
@@ -140,18 +157,6 @@ body {
   height: 100%;
 }
 
-.socket {
-  position: absolute;
-  left: calc((100% - var(--socket-d)) / 2);
-  top: calc((100% - var(--socket-d)) / 2);
-  width: var(--socket-d);
-  height: var(--socket-d);
-  border-radius: 50%;
-  background: radial-gradient(60% 60% at 50% 55%, #2d5c74 0 55%, #244d62 56% 65%, #1d4053 66% 100%);
-  box-shadow:
-    inset 0 0.2vmin 0.4vmin rgba(0, 0, 0, 0.5),
-    inset 0 -0.1vmin 0.3vmin rgba(255, 255, 255, 0.08);
-}
 
 /* ===== Ships ===== */
 .ship {
@@ -171,6 +176,13 @@ body {
   filter: drop-shadow(0 0.4vmin 0.7vmin rgba(0, 0, 0, 0.3));
   z-index: 5;
   pointer-events: none;
+}
+
+.ship[style*="--rotate:90deg"] {
+  transform-origin: top left;
+  transform: rotate(90deg) translateY(-100%);
+  width: calc(var(--h) * 10%);
+  height: calc(var(--w) * 10%);
 }
 
 .ship img {

@@ -1,6 +1,5 @@
-(executables
+(executable
+ (name battleship_ui)
  (modes js)
- (names battleship_ui)
- (libraries bonsai.web core virtual_dom battleship_logic_library)
- (preprocess
-  (pps ppx_jane bonsai.ppx_bonsai)))
+ (libraries core bonsai bonsai.web virtual_dom battleship_logic_library)
+ (preprocess (pps ppx_jane bonsai.ppx_bonsai)))

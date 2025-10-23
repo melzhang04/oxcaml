@@ -31,7 +31,7 @@ dune build @runtest --watch
 
 To promote/update expect-tests:
 ```shell
-dune promote
+dune promote 
 ```
 
 To update the javascript:

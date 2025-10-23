@@ -4,151 +4,215 @@ open Hw2_battleship_logic
 open Virtual_dom
 open! Bonsai.Let_syntax
 
-let viewbox = Vdom.Attr.create "viewBox" "0 0 100 100"
-
-let hit_mark =
-  Vdom.Node.inner_html_svg
-    ~tag:"svg"
-    ~attrs:[ viewbox ]
-    ~this_html_is_sanitized_and_is_totally_safe_trust_me:
-      "<line x1='25' y1='25' x2='75' y2='75' stroke='red' stroke-width='8' stroke-linecap='round' />\
-       <line x1='25' y1='75' x2='75' y2='25' stroke='red' stroke-width='8' stroke-linecap='round' />"
-    ()
-;;
-
-let miss_mark =
-  Vdom.Node.inner_html_svg
-    ~tag:"svg"
-    ~attrs:[ viewbox ]
-    ~this_html_is_sanitized_and_is_totally_safe_trust_me:
-      "<circle cx='50' cy='50' r='10' stroke='navy' stroke-width='6' fill='none' />"
-    ()
-;;
-
-let render_cell (board : Board.t) (pos : Cell_position.t) ~(clickable : bool)
-    ~(on_click : unit Vdom.Effect.t)
-  =
-  let cell_state = Map.find board.shots pos in
-  let content =
-    match cell_state with
-    | Some Cell_type.Hit -> hit_mark
-    | Some Cell_type.Miss -> miss_mark
-    | Some Cell_type.Ship -> hit_mark
-    | None ->
-      if (not clickable) && Board.cell_has_ship board pos
-      then Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "ship-cell" ] []
-      else Vdom.Node.none
+(* === Ship Node === *)
+let ship_node (ship : Ship.t) =
+  let file =
+    match String.lowercase ship.Ship.id with
+    | id when String.is_substring id ~substring:"carrier" -> "Aircraft_Carrier.svg"
+    | id when String.is_substring id ~substring:"battleship" -> "Battleship.svg"
+    | id when String.is_substring id ~substring:"cruiser" -> "Cruiser.svg"
+    | id when String.is_substring id ~substring:"submarine" -> "Submarine.svg"
+    | id when String.is_substring id ~substring:"destroyer" -> "Destroyer.svg"
+    | _ -> "Cruiser.svg"
   in
-  let base_attrs =
-    [ Vdom.Attr.class_ "cell"
-    ; Vdom.Attr.style
-        Css_gen.(
-          position `Absolute
-          @> top
-               (`Percent
-                  (Percent.of_percentage
-                     (Float.of_int pos.row *. (100. /. Float.of_int board.rows))))
-          @> left
-               (`Percent
-                  (Percent.of_percentage
-                     (Float.of_int pos.column *. (100. /. Float.of_int board.cols))))
-          @> width
-               (`Percent
-                  (Percent.of_percentage (100. /. Float.of_int board.cols)))
-          @> height
-               (`Percent
-                  (Percent.of_percentage (100. /. Float.of_int board.rows)))
-          @> border ~width:(`Px 1) ~style:`Solid ~color:(`Name "#1f3649") ()
-          @> background_color
-               (if (not clickable) && not (Map.mem board.shots pos)
-                then (`Name "#6aa7c0")
-                else (`Name "#a8c4d4"))
-        )
-    ]
-  in
-  let clickable_attr =
-    if clickable then Vdom.Attr.on_click (fun _ -> on_click) else Vdom.Attr.empty
-  in
-  Vdom.Node.div ~attrs:(base_attrs @ [ clickable_attr ]) [ content ]
-;;
-
-let render_board (board : Board.t) ~clickable ~on_click =
-  let cells =
-    List.concat_map (List.init board.rows ~f:Fn.id) ~f:(fun r ->
-      List.map (List.init board.cols ~f:Fn.id) ~f:(fun c ->
-        let pos = { Cell_position.row = r; column = c } in
-        render_cell board pos ~clickable ~on_click:(on_click pos)))
-  in
+  let first = List.hd_exn ship.cells in
+  let last = List.last_exn ship.cells in
+  let horizontal = first.Cell_position.row = last.row in
+  let len = List.length ship.cells in
+  let rotate = if horizontal then "0deg" else "90deg" in
+  let (w, h) = if horizontal then (len, 1) else (1, len) in
   Vdom.Node.div
     ~attrs:
-      [ Vdom.Attr.class_ "board-grid"
-      ; Vdom.Attr.style
-          Css_gen.(
-            position `Relative
-            @> width (`Percent (Percent.of_percentage 100.))
-            @> height (`Percent (Percent.of_percentage 100.))
-            @> border_radius (`Px 8)
-            @> overflow `Hidden)
+      [ Vdom.Attr.class_ "ship"
+      ; Vdom.Attr.create "style"
+          (Printf.sprintf "--x:%d; --y:%d; --w:%d; --h:%d; --rotate:%s;"
+             first.column first.row w h rotate)
       ]
-    cells
-;;
+    [ Vdom.Node.img
+        ~attrs:[ Vdom.Attr.src ("hw5_html_css/" ^ file); Vdom.Attr.alt ship.Ship.id ] ()
+    ]
 
-let battleship_app =
-  let init_state =
-    Game_state.create_random ~rows:10 ~cols:10 ~seed:42 |> Result.ok |> Option.value_exn
+(* === Marker Node === *)
+let marker_node ~hit ~x ~y =
+  let cls = if hit then "marker hit" else "marker miss" in
+  let style =
+    Printf.sprintf
+      "left:calc(%d * 100%% / var(--n)); top:calc(%d * 100%% / var(--n));" x y
   in
-  let%sub game_state_var, set_game_state = Bonsai.state ~default_model:init_state (module Game_state) in
-  let%arr game_state = game_state_var and set_game_state = set_game_state in
-  let is_game_over = Decision.is_game_over game_state.Game_state.decision in
+  Vdom.Node.div ~attrs:[ Vdom.Attr.class_ cls; Vdom.Attr.create "style" style ] []
 
-  let handle_click pos =
-    if is_game_over
-    then Vdom.Effect.Ignore
-    else (
-      match Game_state.make_move game_state pos with
-      | Ok new_state -> set_game_state new_state
-      | Error _ -> Vdom.Effect.Ignore)
+(* === Single Cell === *)
+let cell_node ~x ~y ~clickable ~on_click =
+  let click_attr =
+    if clickable then
+      Vdom.Attr.on_click (fun _ -> on_click { Cell_position.row = y; column = x })
+    else Vdom.Attr.empty
   in
-
-  let title =
-    match game_state.decision with
-    | In_progress { whose_turn } ->
-      Vdom.Node.div
-        ~attrs:[ Vdom.Attr.class_ "status" ]
-        [ Vdom.Node.textf
-            "Turn: %s"
-            (match whose_turn with P1 -> "Player 1" | P2 -> "Player 2") ]
-    | Winner p ->
-      Vdom.Node.div
-        ~attrs:[ Vdom.Attr.class_ "status winner" ]
-        [ Vdom.Node.textf
-            "Winner: %s"
-            (match p with P1 -> "Player 1" | P2 -> "Player 2") ]
+  let style =
+    Printf.sprintf
+      "left:calc(%d * 100%% / var(--n)); \
+       top:calc(%d * 100%% / var(--n)); \
+       width:calc(100%% / var(--n)); \
+       height:calc(100%% / var(--n)); \
+       box-sizing:border-box; \
+       border:1px solid rgba(255,255,255,0.15); \
+       background:rgba(0,0,0,0.05);"
+      x y
   in
+  Vdom.Node.div
+    ~attrs:[ Vdom.Attr.class_ "cell"; Vdom.Attr.create "style" style; click_attr ]
+    []
 
-  let p1_view =
-    Vdom.Node.div
-      ~attrs:[ Vdom.Attr.class_ "board-container" ]
-      [ Vdom.Node.h3 [ Vdom.Node.text "My Board" ]
-      ; render_board game_state.p1_board ~clickable:false
-          ~on_click:(fun _ -> Vdom.Effect.Ignore)
-      ]
+(* === Playfield === *)
+let render_playfield (board : Board.t) ~clickable ~on_click ~is_game_over =
+  let cells =
+    List.concat_map (List.init board.rows ~f:Fn.id) ~f:(fun y ->
+      List.map (List.init board.cols ~f:Fn.id) ~f:(fun x ->
+        cell_node ~x ~y ~clickable ~on_click))
   in
 
-  let p2_view =
-    Vdom.Node.div
-      ~attrs:[ Vdom.Attr.class_ "board-container" ]
-      [ Vdom.Node.h3 [ Vdom.Node.text "Opponent’s Board" ]
-      ; render_board game_state.p2_board ~clickable:true ~on_click:handle_click
-      ]
+  (* Show ships only if fully sunk OR after game ends *)
+  let ships =
+    if is_game_over then
+      List.map board.ships ~f:ship_node
+    else
+      List.filter board.ships ~f:(fun ship ->
+        List.for_all ship.cells ~f:(fun cell ->
+          match Map.find board.shots cell with
+          | Some Cell_type.Hit -> true
+          | _ -> false))
+      |> List.map ~f:ship_node
+  in
+
+  let markers =
+    Map.to_alist board.shots
+    |> List.map ~f:(fun (pos, cell) ->
+      let hit = Cell_type.equal cell Cell_type.Hit in
+      marker_node ~hit ~x:pos.column ~y:pos.row)
   in
 
   Vdom.Node.div
-    ~attrs:[ Vdom.Attr.class_ "battleship-app" ]
-    [ title
+    ~attrs:[ Vdom.Attr.class_ "playfield" ]
+    (cells @ ships @ markers)
+;;
+
+(* === Labels === *)
+let labels_top =
+  let letters = [|"Y";"B";"C";"D";"E";"F";"G";"H";"I";"J"|] in
+  Vdom.Node.div
+    ~attrs:[ Vdom.Attr.class_ "labels-top" ]
+    (Array.to_list (Array.map letters ~f:(fun s -> Vdom.Node.span [ Vdom.Node.text s ])))
+
+let labels_left =
+  let nums = List.init 10 ~f:(fun i -> Int.to_string (i + 1)) in
+  Vdom.Node.div
+    ~attrs:[ Vdom.Attr.class_ "labels-left" ]
+    (List.map nums ~f:(fun n -> Vdom.Node.span [ Vdom.Node.text n ]))
+
+(* === Board Wrapper === *)
+let render_board (board : Board.t) ~clickable ~on_click ~is_game_over =
+  Vdom.Node.div
+    ~attrs:[ Vdom.Attr.class_ "game" ]
+    [ labels_top
+    ; labels_left
     ; Vdom.Node.div
-        ~attrs:[ Vdom.Attr.class_ "boards-wrapper" ]
-        [ p1_view; p2_view ]
+        ~attrs:[ Vdom.Attr.class_ "board" ]
+        [ render_playfield board ~clickable ~on_click ~is_game_over ]
+    ]
+
+(* === Main App === *)
+let battleship_app =
+  let init_state =
+    let p1 =
+      Game_state.random_fleet ~rows:10 ~cols:10 ~player:Player_kind.P1 ~seed:(Core.Random.int_incl 0 100000)
+    in
+    let p2 =
+      Game_state.random_fleet ~rows:10 ~cols:10 ~player:Player_kind.P2 ~seed:(Core.Random.int_incl 0 100000)
+    in
+    Game_state.create ~rows:10 ~cols:10 ~p1_ships:p1 ~p2_ships:p2
+    |> Result.ok |> Option.value_exn
+  in
+
+  let%sub game_state, set_game_state =
+    Bonsai.state ~default_model:init_state (module Game_state)
+  in
+  let%arr game_state = game_state
+  and set_game_state = set_game_state in
+
+  let handle_click pos =
+    match Game_state.make_move game_state pos with
+    | Ok new_state -> set_game_state new_state
+    | Error _ -> Vdom.Effect.Ignore
+  in
+
+  let is_game_over =
+    match game_state.decision with
+    | Decision.Winner _ -> true
+    | _ -> false
+  in
+
+  (* === Header === *)
+  let header =
+    Vdom.Node.div
+      ~attrs:[ Vdom.Attr.class_ "header" ]
+      [ Vdom.Node.h1
+          ~attrs:[ Vdom.Attr.class_ "bungee-tint-regular" ]
+          [ Vdom.Node.text "BATTLESHIP" ] ]
+  in
+
+  (* === Turn Indicator === *)
+  let turn_text =
+    match game_state.decision with
+    | Decision.In_progress { whose_turn } ->
+        (match whose_turn with
+         | Player_kind.P1 -> "PLAYER 1’S TURN"
+         | Player_kind.P2 -> "PLAYER 2’S TURN")
+    | Decision.Winner winner ->
+        (match winner with
+         | Player_kind.P1 -> "PLAYER 1 WINS!"
+         | Player_kind.P2 -> "PLAYER 2 WINS!")
+  in
+  let turn_indicator =
+    Vdom.Node.div
+      ~attrs:[ Vdom.Attr.class_ "turn-indicator" ]
+      [ Vdom.Node.text turn_text ]
+  in
+
+  (* === Clickability by turn === *)
+  let my_clickable, opp_clickable =
+    match game_state.decision with
+    | Decision.In_progress { whose_turn = Player_kind.P1 } -> (false, true)
+    | Decision.In_progress { whose_turn = Player_kind.P2 } -> (true, false)
+    | Decision.Winner _ -> (false, false)
+  in
+
+  (* === Player Boards === *)
+  let my_board =
+    Vdom.Node.div
+      ~attrs:[ Vdom.Attr.create "style" "display:flex; flex-direction:column; align-items:center;" ]
+      [ Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "board-title" ] [ Vdom.Node.text "PLAYER 1'S BOARD" ]
+      ; render_board game_state.p1_board
+          ~clickable:my_clickable ~on_click:handle_click ~is_game_over
+      ]
+  in
+
+  let opp_board =
+    Vdom.Node.div
+      ~attrs:[ Vdom.Attr.create "style" "display:flex; flex-direction:column; align-items:center;" ]
+      [ Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "board-title" ] [ Vdom.Node.text "PLAYER 2'S BOARD" ]
+      ; render_board game_state.p2_board
+          ~clickable:opp_clickable ~on_click:handle_click ~is_game_over
+      ]
+  in
+
+  (* === Layout === *)
+  Vdom.Node.div
+    ~attrs:[ Vdom.Attr.class_ "battleship-container" ]
+    [ header
+    ; turn_indicator
+    ; Vdom.Node.div
+        ~attrs:[ Vdom.Attr.class_ "board-wrapper" ]
+        [ my_board; opp_board ]
     ]
 ;;
 

@@ -107,7 +107,30 @@ module Game_state : sig
     -> cols:int
     -> seed:int
     -> (t, Create_error.t list) Result.t
+  
+  val cells_from_start
+    :  start:Cell_position.t
+    -> len:int
+    -> horizontal:bool
+    -> Cell_position.t list
 
+  val can_place_on_board
+    :  rows:int
+    -> cols:int
+    -> existing:Ship.t list
+    -> Cell_position.t list
+    -> bool
+
+  val fleet_spec : (string * int) list
+
+    module Ship_rules : sig
+    val validate_fleet
+      :  rows:int
+      -> cols:int
+      -> Ship.t list
+      -> Create_error.t list
+  end
+  
   val get_all_moves : t -> Move.t list
   val make_move : t -> Move.t -> (t, Move_error.t) Result.t
 end
