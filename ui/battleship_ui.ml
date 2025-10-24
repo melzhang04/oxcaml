@@ -98,7 +98,7 @@ let render_playfield (board : Board.t) ~clickable ~on_click ~is_game_over =
 
 (* === Labels === *)
 let labels_top =
-  let letters = [|"Y";"B";"C";"D";"E";"F";"G";"H";"I";"J"|] in
+  let letters = [|"A";"B";"C";"D";"E";"F";"G";"H";"I";"J"|] in
   Vdom.Node.div
     ~attrs:[ Vdom.Attr.class_ "labels-top" ]
     (Array.to_list (Array.map letters ~f:(fun s -> Vdom.Node.span [ Vdom.Node.text s ])))
