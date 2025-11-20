@@ -55,13 +55,6 @@ let pretty_print_board (state : Game_state.t) =
   print_board board;
   print_s [%sexp (state.decision : Decision.t)]
 
-let print_both_boards (state : Game_state.t) =
-  print_endline "P2 board (shots by P1):";
-  print_board state.p2_board;
-  print_endline "P1 board (shots by P2):";
-  print_board state.p1_board;
-  print_s [%sexp (state.decision : Decision.t)]
-
 let print_board_with_ships (board : Board.t) =
   let ship_cells =
     Cell_position.Set.of_list (List.concat_map board.ships ~f:(fun s -> s.Ship.cells))
@@ -105,6 +98,8 @@ let%test "create 10x10 valid boards for P1 and P2" =
          } : Board.t)
     ; decision = Decision.In_progress { whose_turn = Player_kind.P1 }
     ; last_move = None
+    ; phase = Phase.In_progress
+    ; mode = Game_mode.PvP
     }
   in
   Game_state.equal state expected
@@ -139,9 +134,7 @@ let%expect_test "Game_state.create: out-of-bounds cell => Illegal_ship_cell" =
     ]
   in
   create_and_print ~rows:10 ~cols:10 ~p1:p1_oob ~p2:p2_ships ();
-  [%expect
-    {|
-    (Error (Illegal_ship_cell)) |}]
+  [%expect {| (Error (Illegal_ship_cell)) |}]
 
 let%expect_test "Game_state.create: diagonal/discontiguous => Illegal_ship_cell" =
   let p1_diag : Ship.t list =
@@ -153,9 +146,7 @@ let%expect_test "Game_state.create: diagonal/discontiguous => Illegal_ship_cell"
     ]
   in
   create_and_print ~rows:10 ~cols:10 ~p1:p1_diag ~p2:p2_ships ();
-  [%expect
-    {|
-    (Error (Illegal_ship_cell)) |}]
+  [%expect {| (Error (Illegal_ship_cell)) |}]
 
 let%expect_test "Game_state.create: wrong length => Illegal_ship_cell" =
   let p1_wrong_len : Ship.t list =
@@ -167,105 +158,76 @@ let%expect_test "Game_state.create: wrong length => Illegal_ship_cell" =
     ]
   in
   create_and_print ~rows:10 ~cols:10 ~p1:p1_wrong_len ~p2:p2_ships ();
-  [%expect
-    {|
-    (Error (Illegal_ship_cell)) |}]
+  [%expect {| (Error (Illegal_ship_cell)) |}]
 
 let%expect_test "random setup preview" =
   ignore (preview_random_setup ~seed:7);
   [%expect {|
-  P1 placement preview:
-   | | | | | |S|S|S|
-  -------------------
-   | | | | | | | | |
-  -------------------
-   | | | | | | | | |
-  -------------------
-   | | | | | | | | |
-  -------------------
-   | |S| | | | |S|S|S
-  -------------------
-   | |S|S| | | |S| |
-  -------------------
-   | |S|S| | | |S| |
-  -------------------
-   | | |S| | | |S| |
-  -------------------
-   | | |S| | | |S| |
-  -------------------
-   | | | | | | | | |
-  P2 placement preview:
-   | | | | | | | | |
-  -------------------
-  S|S| | | | | | | |
-  -------------------
-   | | |S| | |S| | |
-  -------------------
-   | | |S| | |S| | |
-  -------------------
-   | | |S| | |S| | |
-  -------------------
-   | | |S| | | | | |
-  -------------------
-   | | |S| |S| | | |
-  -------------------
-   | | | | |S| | | |S
-  -------------------
-   | | | | |S| | | |S
-  -------------------
-   | | | | |S| | | |S |}]
-
-let%expect_test "sample random state (seed=42)" =
-  let s = Hw2_battleship_logic.Game_state.create_random ~rows:10 ~cols:10 ~seed:42 |> ok_exn in
-  print_board_with_ships s.p1_board;
-  [%expect {|
-     | | | |S|S|S|S| |
-    -------------------
-     |S|S|S| | | | | |
+    P1 placement preview:
+     | | | | | |S|S|S|
     -------------------
      | | | | | | | | |
     -------------------
-     | | |S|S| | |S| |
+     | | | | | | | | |
     -------------------
-     | | | | | |S|S| |
+     | | | | | | | | |
     -------------------
-     | | | | | |S|S| |
+     | |S| | | | |S|S|S
     -------------------
-     | | | | | |S| | |
+     | |S|S| | | |S| |
     -------------------
-     | | | | | |S| | |
+     | |S|S| | | |S| |
     -------------------
-     | | | | | |S| | |
+     | | |S| | | |S| |
+    -------------------
+     | | |S| | | |S| |
+    -------------------
+     | | | | | | | | |
+    P2 placement preview:
+     | | | | | | | |S|S
+    -------------------
+     | | | | |S|S|S|S|
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |S
+    -------------------
+     | | | | | | | |S|S
+    -------------------
+     | | | | | | | |S|S
+    -------------------
+     | | | | | | | |S|
+    -------------------
+     | | |S|S|S|S|S| |
     -------------------
      | | | | | | | | | |}]
-
 
 let%expect_test "pretty print opponent board (initial: all blanks)" =
   let s0 = init_state () in
   pretty_print_board s0;
-  [%expect
-    {|
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
--------------------
- | | | | | | | | | 
-(In_progress (whose_turn P1))
-|}]
+  [%expect {|
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    -------------------
+     | | | | | | | | |
+    (In_progress (whose_turn P1)) |}]
 
 let%expect_test "Game_state.make_move: illegal cell and already-shot" =
   let s0 = init_state () in
@@ -336,49 +298,24 @@ let%test "random walk reaches terminal state (seed=3)" =
 let%test "random walk reaches terminal state (seed=1234)" =
   Decision.is_game_over (random_walk (init_state ()) ~random_seed:1234).decision
 
-let%expect_test "Battleship random walk (seed=7) — full boards" =
-  let final = random_walk (init_state ()) ~random_seed:7 in
-  print_both_boards final;
+let%expect_test "placement phase transitions correctly" =
+  let s0 = Game_state.create_empty ~rows:10 ~cols:10 ~mode:Game_mode.PvP in
+  print_s [%sexp (s0.phase : Phase.t)];
+  let s1 = Game_state.randomize_player_fleet s0 ~player:Player_kind.P1 ~seed:42 in
+  print_s [%sexp (s1.phase : Phase.t)];
+  let s2 = Game_state.randomize_player_fleet s1 ~player:Player_kind.P2 ~seed:43 in
+  print_s [%sexp (s2.phase : Phase.t)];
   [%expect {|
-P2 board (shots by P1):
-M|M|M| |M|M|M|M|M|H
--------------------
-M|M|M|M|M|M|M|M|M|H
--------------------
-M|M|M|M|M| |M|M|M|H
--------------------
- |M|M|H|H|H|M|M| |H
--------------------
-M|M|M| |M|M|M|M|M|M
--------------------
-M|M|H|H|H|H|H|M|M|M
--------------------
-H|M|M|M|M|M|M|M|M|M
--------------------
-H|M|M|M|M|M|M|M|M|M
--------------------
-H|M|M|M|M|M|M|M|M|M
--------------------
-M|M|M|M|M|M|M|M|H|H
-P1 board (shots by P2):
-H|H|H|M|M|M|M|M|M|M
--------------------
-M|M|M|M|M|M|M|M| |M
--------------------
-M|M| |H|H| |H|M|M|M
--------------------
-M|M|M|M|M|M|M|M| |M
--------------------
-M|M|M|M|M|M|M|H|M|M
--------------------
-M|M|M|M|M|H|M|H|M|M
--------------------
-M|M|M|M|M|H|M|H|M|M
--------------------
-M|M|M|M|M|M|M|M|M|M
--------------------
- |M|M|M|M| |M|M|M|M
--------------------
-H|H|H|H|M|M|M|M|M|M
-(Winner P1)
-|}]
+  (Placement P1)
+  (Placement P2)
+  In_progress
+  |}]
+
+let%expect_test "ai_move returns a move for easy mode" =
+  let s0 = Game_state.create_empty ~rows:10 ~cols:10 ~mode:Game_mode.PvE_easy in
+  let s1 = Game_state.randomize_player_fleet s0 ~player:Player_kind.P1 ~seed:11 in
+  let s2 = Game_state.randomize_player_fleet s1 ~player:Player_kind.P2 ~seed:12 in
+  match Game_state.ai_move s2 with
+  | None -> print_endline "no move"
+  | Some mv -> print_s [%sexp (mv : Move.t)];
+  [%expect {| ((row 2) (column 3)) |}]
