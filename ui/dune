@@ -1,5 +1,24 @@
+(library
+ (name firebase_bind)
+ (modules firebase)
+ (libraries js_of_ocaml js_of_ocaml-ppx)
+ (preprocess
+   (pps js_of_ocaml-ppx))
+)
+
 (executable
  (name battleship_ui)
  (modes js)
- (libraries core bonsai bonsai.web virtual_dom battleship_logic_library)
- (preprocess (pps ppx_jane bonsai.ppx_bonsai)))
+ (modules battleship_ui)
+ (libraries
+   core
+   bonsai
+   bonsai.web
+   virtual_dom
+   battleship_logic_library
+   js_of_ocaml
+   js_of_ocaml-ppx
+   firebase_bind
+ )
+ (preprocess
+   (pps ppx_jane bonsai.ppx_bonsai js_of_ocaml-ppx)))
