@@ -3,6 +3,7 @@ import { initializeApp }
 import {
   getAuth,
   signInAnonymously,
+  signOut,
   onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
@@ -46,6 +47,17 @@ export function signInGuest() {
     })
     .catch((err) => {
       console.error("signInGuest error:", err);
+      throw err;
+    });
+}
+
+export function signOutUser() {
+  return signOut(auth)
+    .then(() => {
+      console.log("Signed out successfully");
+    })
+    .catch((err) => {
+      console.error("signOut error:", err);
       throw err;
     });
 }
@@ -162,6 +174,7 @@ export async function sendMove(gameId, row, col, player) {
 
 window.firebaseBindings = {
   signInGuest,
+  signOutUser,
   getCurrentUid,
   requestQuickMatch,
   subscribeGame,

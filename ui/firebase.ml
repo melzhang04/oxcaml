@@ -2,6 +2,7 @@ open Js_of_ocaml
 
 class type firebase_api = object
   method signInGuest : unit -> unit Js.meth
+  method signOutUser : unit -> unit Js.meth
   method getCurrentUid : unit -> Js.js_string Js.t Js.opt Js.meth
 
   method requestQuickMatch :
@@ -21,6 +22,9 @@ let firebase : firebase_api Js.t =
 
 let sign_in_guest () : unit =
   firebase##signInGuest ()
+
+let sign_out () : unit =
+  firebase##signOutUser ()
 
 let get_current_uid () : string option =
   match firebase##getCurrentUid () |> Js.Opt.to_option with

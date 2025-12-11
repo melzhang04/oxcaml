@@ -383,13 +383,22 @@ let game_screen ~state ~set_game_state ~on_reset ~local_player =
             match pick_ai_move mode ns ~time_ms:20 with
             | None -> Vdom.Effect.Ignore
             | Some mv ->
-              (match Game_state.make_move ns mv with
-               | Ok ns' -> set_game_state ns'
-               | Error _ -> Vdom.Effect.Ignore)
+                (* Schedule AI move with delay *)
+                let open Js_of_ocaml in
+                let callback () =
+                  match Game_state.make_move ns mv with
+                  | Ok ns' ->
+                      let effect = set_game_state ns' in
+                      Vdom.Effect.Expert.handle_non_dom_event_exn effect
+                  | Error _ -> ()
+                in
+                let _ = Dom_html.setTimeout callback 1000. in
+                Vdom.Effect.Ignore
           end
         else Vdom.Effect.Ignore
     | _ -> Vdom.Effect.Ignore
   in
+  
   let handle_click pos =
     match Game_state.make_move state pos with
     | Ok ns ->
@@ -466,7 +475,6 @@ let game_screen ~state ~set_game_state ~on_reset ~local_player =
             [ Vdom.Node.text "Reset Game" ];
         ];
     ]
-
 (* Root App *)
 
 let battleship_app =
@@ -507,14 +515,13 @@ let battleship_app =
                     in
                     { st' with phase = Phase.In_progress }
                 | Phase.Placement Player_kind.P1, Some Game_mode.PvP ->
-                    { st with phase = Phase.Placement Player_kind.P2 }
+                    { st with phase = Phase.In_progress }
                 | Phase.Placement Player_kind.P2, _ ->
                     { st with phase = Phase.In_progress }
                 | _ -> st
               in
               set (Some next))
-  in
-
+  in 
   let%sub placement_view =
     match%sub game_state with
     | None -> Bonsai.const (Vdom.Node.text "")
@@ -524,33 +531,51 @@ let battleship_app =
   in
 
   let%sub auth_bar =
-    let%arr signed_in = signed_in
-    and user_id = user_id
-    and set_signed_in = set_signed_in
-    and set_user_id = set_user_id in
-    let label =
-      match (signed_in, user_id) with
-      | false, _ -> "Sign in (guest)"
-      | true, None -> "Signed in (resolving uid...)"
-      | true, Some uid -> "Signed in: " ^ String.prefix uid 6 ^ "..."
+  let%arr signed_in = signed_in
+  and user_id = user_id
+  and set_signed_in = set_signed_in
+  and set_user_id = set_user_id in
+  
+  let label =
+    match (signed_in, user_id) with
+    | false, _ -> "Sign In (Guest)"
+    | true, None -> "Signed in..."
+    | true, Some uid -> "User: " ^ String.prefix uid 8
+  in
+  
+  let on_sign_in _ev =
+    F.sign_in_guest ();
+    let uid_opt = F.get_current_uid () in
+    let set_uid_eff =
+      match uid_opt with
+      | Some uid -> set_user_id (Some uid)
+      | None -> Vdom.Effect.Ignore
     in
-    let on_click _ev =
-      F.sign_in_guest ();
-      let uid_opt = F.get_current_uid () in
-      let set_uid_eff =
-        match uid_opt with
-        | Some uid -> set_user_id (Some uid)
-        | None -> Vdom.Effect.Ignore
-      in
-      Vdom.Effect.Many [ set_uid_eff; set_signed_in true ]
-    in
-    Vdom.Node.div
-      ~attrs:[ Vdom.Attr.class_ "auth-bar" ]
+    Vdom.Effect.Many [ set_uid_eff; set_signed_in true ]
+  in
+  
+  let on_sign_out _ev =
+    F.sign_out ();
+    Vdom.Effect.Many [ set_user_id None; set_signed_in false ]
+  in
+  
+  Vdom.Node.div
+    ~attrs:[ Vdom.Attr.class_ "auth-bar" ]
+    (if signed_in then
       [
         Vdom.Node.button
-          ~attrs:[ Vdom.Attr.on_click on_click ]
+          ~attrs:[ Vdom.Attr.create "disabled" "disabled" ]
           [ Vdom.Node.text label ];
+        Vdom.Node.button
+          ~attrs:[ Vdom.Attr.on_click on_sign_out ]
+          [ Vdom.Node.text "Sign Out" ];
       ]
+    else
+      [
+        Vdom.Node.button
+          ~attrs:[ Vdom.Attr.on_click on_sign_in ]
+          [ Vdom.Node.text label ];
+      ])
   in
 
   let%arr setup_mode = setup_mode
