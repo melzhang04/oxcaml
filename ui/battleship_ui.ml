@@ -6,6 +6,7 @@ open Virtual_dom
 open! Bonsai.Let_syntax
 
 module Js = Js_of_ocaml.Js
+module Dom_html = Js_of_ocaml.Dom_html
 module Firebug = Js_of_ocaml.Firebug
 module F = Firebase_bind.Firebase
 
@@ -519,7 +520,6 @@ let battleship_app =
   let%sub user_id, set_user_id = Bonsai.state_opt (module String) in
   let%sub setup_mode, set_setup_mode = Bonsai.state_opt (module Game_mode) in
   let%sub game_state, set_game_state = Bonsai.state_opt (module Game_state) in
-  (* base_state = state at the moment both players are ready & fleets loaded *)
   let%sub base_state, set_base_state =
     Bonsai.state_opt (module Game_state)
   in
@@ -529,10 +529,19 @@ let battleship_app =
     Bonsai.state (module Bool) ~default_model:false
   in
   let%sub ready_status_subscribed, set_ready_status_subscribed =
-    Bonsai.state (module Bool) ~default_model:false
+    Bonsai.state_opt (module String)
   in
   let%sub move_subscribed, set_move_subscribed =
-    Bonsai.state (module Bool) ~default_model:false
+    Bonsai.state_opt (module String)
+  in
+  let%sub _unsub_ready_ref, _set_unsub_ready_ref = 
+    Bonsai.state_opt (module Unit) 
+  in
+  let%sub _unsub_moves_ref, _set_unsub_moves_ref = 
+    Bonsai.state_opt (module Unit) 
+  in
+  let%sub forfeit_alert_shown, set_forfeit_alert_shown =
+    Bonsai.state_opt (module String)
   in
 
   let local_player_val =
@@ -621,7 +630,19 @@ let battleship_app =
     let%arr signed_in = signed_in
     and user_id = user_id
     and set_signed_in = set_signed_in
-    and set_user_id = set_user_id in
+    and set_user_id = set_user_id
+    and setup_mode = setup_mode
+    and game_state = game_state
+    and set_setup_mode = set_setup_mode
+    and set_game_state = set_game_state
+    and set_match_info = set_match_info
+    and set_waiting_for_match = set_waiting_for_match
+    and set_ready_status_subscribed = set_ready_status_subscribed
+    and set_move_subscribed = set_move_subscribed
+    and set_forfeit_alert_shown = set_forfeit_alert_shown
+    and local_player = local_player_val
+    and game_id_opt = game_id_val
+    in
 
     let label =
       match signed_in, user_id with
@@ -641,9 +662,57 @@ let battleship_app =
       Vdom.Effect.Many [ eff; set_signed_in true ]
     in
 
+    let in_active_game =
+      match game_state with
+      | Some st ->
+          (match st.phase with
+           | Phase.In_progress -> true
+           | Phase.Placement _
+           | Phase.Game_over -> false)
+      | None -> false
+    in
+
     let on_sign_out _ =
-      F.sign_out ();
-      Vdom.Effect.Many [ set_user_id None; set_signed_in false ]
+      let proceed =
+        if in_active_game then
+          Js.to_bool
+            (Dom_html.window##confirm
+               (Js.string
+                  "You are currently in a game. If you sign out now, you will forfeit the match. Continue?"))
+        else true
+      in
+      if not proceed then Vdom.Effect.Ignore
+      else (
+        F.cancel_matchmaking ();
+        (match setup_mode, game_state, game_id_opt, local_player with
+        | Some Game_mode.PvP, Some _, Some gid, lp ->
+            let player_str =
+              match lp with
+              | Player_kind.P1 -> "P1"
+              | Player_kind.P2 -> "P2"
+            in
+            let _ = F.reset_game ~game_id:gid ~player:player_str in
+            ()
+        | _ -> ());
+
+        F.clear_forfeit_on_disconnect ();
+        let clear_game =
+          Vdom.Effect.Many
+            [ set_game_state None
+            ; set_setup_mode None
+            ; set_match_info None
+            ; set_waiting_for_match false
+            ; set_ready_status_subscribed None
+            ; set_move_subscribed None
+            ; set_forfeit_alert_shown None
+            ]
+        in
+        F.sign_out ();
+        let clear_auth =
+          Vdom.Effect.Many [ set_user_id None; set_signed_in false ]
+        in
+        Vdom.Effect.Many [ clear_game; clear_auth ]
+      )
     in
 
     Vdom.Node.div
@@ -683,7 +752,11 @@ let battleship_app =
   and set_ready_status_subscribed = set_ready_status_subscribed
   and move_subscribed = move_subscribed
   and set_move_subscribed = set_move_subscribed
+  and signed_in = signed_in
+  and _forfeit_alert_shown = forfeit_alert_shown
+  and set_forfeit_alert_shown = set_forfeit_alert_shown
   in
+
   let () =
     match match_info with
     | Some match_str ->
@@ -692,8 +765,111 @@ let battleship_app =
           | gid :: _ -> gid
           | _ -> ""
         in
-        if not ready_status_subscribed then begin
-          F.subscribe_ready_status ~game_id ~on_ready:(fun status ->
+
+        let should_subscribe_moves_early =
+          match move_subscribed with
+          | None -> true
+          | Some subscribed_gid -> not (String.equal subscribed_gid game_id)
+        in
+        
+        if should_subscribe_moves_early then begin
+          let forfeit_alert_ref = ref false in
+          let _unsub_game = F.subscribe_game game_id (fun moves_joined ->
+              if String.is_prefix moves_joined ~prefix:"__FORFEIT__:" then (
+                if not !forfeit_alert_ref then (
+                  forfeit_alert_ref := true;
+                  
+                  let forfeit_by =
+                    String.chop_prefix_exn moves_joined ~prefix:"__FORFEIT__:"
+                  in
+                  let is_p1_local =
+                    Player_kind.equal local_player Player_kind.P1
+                  in
+                  let local_player_str = if is_p1_local then "P1" else "P2" in
+                  let i_forfeited =
+                    String.equal forfeit_by local_player_str
+                  in
+                  if not i_forfeited then (
+                    let _ =
+                      Dom_html.window##alert
+                        (Js.string "Your opponent has disconnected. Returning to main menu.")
+                    in
+                    ()
+                  );
+
+                  F.clear_forfeit_on_disconnect ();
+
+                  let eff =
+                    Vdom.Effect.Many
+                      [ set_game_state None
+                      ; set_base_state None
+                      ; set_setup_mode None
+                      ; set_match_info None
+                      ; set_waiting_for_match false
+                      ; set_ready_status_subscribed None
+                      ; set_move_subscribed None
+                      ]
+                  in
+                  Vdom.Effect.Expert.handle_non_dom_event_exn eff
+                )
+              ) else if String.is_prefix moves_joined ~prefix:"__RESET__:" then (
+                if not !forfeit_alert_ref then (
+                  forfeit_alert_ref := true;
+                  
+                  let reset_by =
+                    String.chop_prefix_exn moves_joined ~prefix:"__RESET__:"
+                  in
+                  let is_p1_local =
+                    Player_kind.equal local_player Player_kind.P1
+                  in
+                  let local_player_str = if is_p1_local then "P1" else "P2" in
+                  let i_forfeited =
+                    String.equal reset_by local_player_str
+                  in
+                  if not i_forfeited then (
+                    let _ =
+                      Dom_html.window##alert
+                        (Js.string "You win! Your opponent has forfeited the match.")
+                    in
+                    ()
+                  );
+                  
+                  F.clear_forfeit_on_disconnect ();
+
+                  let eff =
+                    Vdom.Effect.Many
+                      [ set_game_state None
+                      ; set_base_state None
+                      ; set_setup_mode None
+                      ; set_match_info None
+                      ; set_waiting_for_match false
+                      ; set_ready_status_subscribed None
+                      ; set_move_subscribed None
+                      ]
+                  in
+                  Vdom.Effect.Expert.handle_non_dom_event_exn eff
+                )
+              )) in
+          let eff = set_move_subscribed (Some game_id) in
+          Vdom.Effect.Expert.handle_non_dom_event_exn eff;
+          
+          let is_p1_local = Player_kind.equal local_player Player_kind.P1 in
+          let opponent_player_str = if is_p1_local then "P2" else "P1" in
+          let _unsub_heartbeat = F.monitor_opponent_heartbeat ~game_id ~opponent_player:opponent_player_str
+            ~on_disconnect:(fun _player ->
+              ())
+          in
+          ()
+        end;
+        
+        let should_subscribe_ready =
+          match ready_status_subscribed with
+          | None -> true
+          | Some subscribed_gid -> not (String.equal subscribed_gid game_id)
+        in
+        
+        if should_subscribe_ready then begin
+          let _unsub_ready = F.subscribe_ready_status ~game_id ~on_ready:(fun status ->
               if String.equal status "BOTH_READY" then
                 F.get_ships ~game_id ~on_result:(fun joined ->
                     let open Js_of_ocaml in
@@ -718,33 +894,10 @@ let battleship_app =
                             ; phase = Phase.In_progress
                             }
                           in
-                          (* Set up move subscription NOW with the base_st we just created *)
-                          if not move_subscribed then begin
-                            F.subscribe_game game_id (fun moves_joined ->
-                                let moves =
-                                  moves_joined
-                                  |> String.split ~on:';'
-                                  |> List.filter ~f:(fun s -> not (String.is_empty s))
-                                in
-                                let final_state =
-                                  List.fold moves ~init:base_st ~f:(fun st move_str ->
-                                      match String.split move_str ~on:',' with
-                                      | [ row; col; _shooter_str ] ->
-                                          let mv =
-                                            { Cell_position.row = Int.of_string row
-                                            ; column = Int.of_string col
-                                            }
-                                          in
-                                          (match Game_state.make_move st mv with
-                                          | Ok st' -> st'
-                                          | Error _ -> st)
-                                      | _ -> st)
-                                in
-                                let eff = set_game_state (Some final_state) in
-                                Vdom.Effect.Expert.handle_non_dom_event_exn eff);
-                            let eff = set_move_subscribed true in
-                            Vdom.Effect.Expert.handle_non_dom_event_exn eff
-                          end;
+                          let is_p1_local = Player_kind.equal local_player Player_kind.P1 in
+                          let local_player_str = if is_p1_local then "P1" else "P2" in
+                          F.setup_forfeit_on_disconnect ~game_id ~player:local_player_str;
+                          
                           let eff =
                             Vdom.Effect.Many
                               [ set_base_state (Some base_st)
@@ -752,11 +905,12 @@ let battleship_app =
                               ]
                           in
                           Vdom.Effect.Expert.handle_non_dom_event_exn eff
+                          
                       | None -> ()
                     in
                     let _ = Dom_html.setTimeout callback 0. in
-                    ()));
-          let eff = set_ready_status_subscribed true in
+                    ())) in
+          let eff = set_ready_status_subscribed (Some game_id) in
           Vdom.Effect.Expert.handle_non_dom_event_exn eff
         end
     | None -> ()
@@ -769,20 +923,40 @@ let battleship_app =
             let init = Game_state.create_empty ~rows:10 ~cols:10 ~mode in
             match mode with
             | Game_mode.PvP ->
-                F.request_quick_match (fun match_str ->
-                    let eff =
-                      Vdom.Effect.Many
-                        [ set_match_info (Some match_str)
-                        ; set_waiting_for_match false
-                        ]
-                    in
-                    Vdom.Effect.Expert.handle_non_dom_event_exn eff);
-                Vdom.Effect.Many
-                  [ set_setup_mode (Some mode)
-                  ; set_game_state (Some init)
-                  ; set_base_state None
-                  ; set_waiting_for_match true
-                  ]
+                if not signed_in then (
+                  let _ =
+                    Dom_html.window##alert
+                      (Js.string
+                         "Please sign in first to play Player vs Player.")
+                  in
+                  Vdom.Effect.Ignore
+                ) else (
+                  F.request_quick_match (fun match_str ->
+                      let game_id, player_str =
+                        match String.split match_str ~on:'|' with
+                        | gid :: role :: _ -> 
+                            (gid, role)
+                        | gid :: [] -> (gid, "P1")
+                        | _ -> ("", "P1")
+                      in
+                      if not (String.is_empty game_id) then
+                        F.setup_forfeit_on_disconnect ~game_id ~player:player_str;
+                      
+                      let eff =
+                        Vdom.Effect.Many
+                          [ set_match_info (Some match_str)
+                          ; set_waiting_for_match false
+                          ]
+                      in
+                      Vdom.Effect.Expert.handle_non_dom_event_exn eff);
+                  Vdom.Effect.Many
+                    [ set_setup_mode (Some mode)
+                    ; set_game_state (Some init)
+                    ; set_base_state None
+                    ; set_waiting_for_match true
+                    ; set_forfeit_alert_shown None
+                    ]
+                )
             | _ ->
                 Vdom.Effect.Many
                   [ set_setup_mode (Some mode)
@@ -815,14 +989,24 @@ let battleship_app =
                         ~set_game_state:(fun ns ->
                           set_game_state (Some ns))
                         ~on_reset:(fun () ->
+                          (match game_id_opt with
+                          | Some gid ->
+                              let player_str =
+                                match local_player with
+                                | Player_kind.P1 -> "P1"
+                                | Player_kind.P2 -> "P2"
+                              in
+                              F.reset_game ~game_id:gid ~player:player_str
+                          | None -> ());
+                          F.clear_forfeit_on_disconnect ();
                           Vdom.Effect.Many
                             [ set_game_state None
                             ; set_base_state None
                             ; set_setup_mode None
                             ; set_match_info None
                             ; set_waiting_for_match false
-                            ; set_ready_status_subscribed false
-                            ; set_move_subscribed false
+                            ; set_ready_status_subscribed None
+                            ; set_move_subscribed None
                             ])
                         ~local_player
                         ~game_id_opt))

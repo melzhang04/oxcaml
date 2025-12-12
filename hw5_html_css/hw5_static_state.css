@@ -353,6 +353,7 @@ button {
   align-items: center;
   pointer-events: none;
   font-size: 7vmin;
+  z-index: 10;
 }
 
 .marker.hit::before {
