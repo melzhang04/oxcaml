@@ -383,6 +383,19 @@ button {
   width: min(75vmin, 75vw);
 }
 
+/* Mobile responsive layout */
+@media (max-width: 768px) {
+  .board-wrapper {
+    flex-direction: column;
+    align-items: center;
+    gap: 3vmin;
+  }
+  
+  .board-container {
+    width: 90vw;
+  }
+}
+
 .board-title {
   margin-bottom: 0.5rem;
   font-weight: 700;

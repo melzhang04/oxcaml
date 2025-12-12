@@ -41,12 +41,6 @@ class type firebase_api = object
     Js.js_string Js.t -> Js.js_string Js.t -> unit Js.meth
 
   method clearForfeitOnDisconnect : unit -> unit Js.meth
-
-  method monitorOpponentHeartbeat :
-    Js.js_string Js.t ->
-    Js.js_string Js.t ->
-    (Js.js_string Js.t -> unit) Js.callback ->
-    (unit -> unit) Js.meth
 end
 
 let firebase : firebase_api Js.t =
@@ -127,12 +121,3 @@ let setup_forfeit_on_disconnect ~(game_id : string) ~(player : string) : unit =
 
 let clear_forfeit_on_disconnect () : unit =
   firebase##clearForfeitOnDisconnect ()
-
-let monitor_opponent_heartbeat ~(game_id : string) ~(opponent_player : string) ~(on_disconnect : string -> unit) : (unit -> unit) =
-  let cb =
-    Js.wrap_callback (fun s ->
-        let str = Js.to_string s in
-        on_disconnect str)
-  in
-  let unsub_js = firebase##monitorOpponentHeartbeat (Js.string game_id) (Js.string opponent_player) cb in
-  fun () -> unsub_js ()

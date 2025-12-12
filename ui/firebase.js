@@ -343,20 +343,24 @@ export function setupForfeitOnDisconnect(gameId, player) {
     }
   }, 3000);
 
-  forfeitOnUnloadHandler = async () => {
+  forfeitOnUnloadHandler = () => {
     console.log(`${player} is leaving - triggering forfeit`);
-    try {
-      await updateDoc(gameRef, {
-        status: "FORFEIT",
-        forfeitBy: player,
-        forfeitAt: serverTimestamp()
-      });
-    } catch (err) {
-      console.error("Error setting forfeit status:", err);
-    }
+    
+    // Use synchronous approach for mobile reliability
+    const forfeitData = {
+      status: "FORFEIT",
+      forfeitBy: player,
+      forfeitAt: serverTimestamp()
+    };
+    
+    // Try to update immediately (may not complete on mobile)
+    updateDoc(gameRef, forfeitData).catch(err => 
+      console.error("Error setting forfeit status:", err)
+    );
   };
   
   window.addEventListener("beforeunload", forfeitOnUnloadHandler);
+  window.addEventListener("pagehide", forfeitOnUnloadHandler);
   
   const visibilityHandler = () => {
     if (document.hidden) {
@@ -387,6 +391,7 @@ export function setupForfeitOnDisconnect(gameId, player) {
     }
     if (forfeitOnUnloadHandler) {
       window.removeEventListener("beforeunload", forfeitOnUnloadHandler);
+      window.removeEventListener("pagehide", forfeitOnUnloadHandler);
       forfeitOnUnloadHandler = null;
     }
     document.removeEventListener("visibilitychange", visibilityHandler);
@@ -400,55 +405,10 @@ export function clearForfeitOnDisconnect() {
   }
   if (forfeitOnUnloadHandler) {
     window.removeEventListener("beforeunload", forfeitOnUnloadHandler);
+    window.removeEventListener("pagehide", forfeitOnUnloadHandler);
     forfeitOnUnloadHandler = null;
   }
   console.log("Cleared forfeit on disconnect handler");
-}
-
-export function monitorOpponentHeartbeat(gameId, opponentPlayer, onDisconnect) {
-  const gameRef = doc(db, "games", gameId);
-  const heartbeatField = opponentPlayer === "P1" ? "p1Heartbeat" : "p2Heartbeat";
-  
-  let lastHeartbeatTime = Date.now();
-  let disconnectAlreadyCalled = false;
-  
-  const checkInterval = setInterval(async () => {
-    try {
-      const snap = await getDoc(gameRef);
-      if (!snap.exists()) {
-        clearInterval(checkInterval);
-        return;
-      }
-      
-      const data = snap.data();
-      const heartbeat = data[heartbeatField];
-      
-      if (heartbeat && heartbeat.toMillis) {
-        lastHeartbeatTime = heartbeat.toMillis();
-      }
-
-      const timeSinceLastBeat = Date.now() - lastHeartbeatTime;
-      if (timeSinceLastBeat > 8000 && !disconnectAlreadyCalled) {
-        disconnectAlreadyCalled = true;
-        console.log(`${opponentPlayer} disconnected - no heartbeat for ${timeSinceLastBeat}ms`);
-        clearInterval(checkInterval);
-
-        await updateDoc(gameRef, {
-          status: "FORFEIT",
-          forfeitBy: opponentPlayer,
-          forfeitAt: serverTimestamp()
-        });
-        
-        onDisconnect(opponentPlayer);
-      }
-    } catch (err) {
-      console.error("Error checking heartbeat:", err);
-    }
-  }, 2000);
-
-  return () => {
-    clearInterval(checkInterval);
-  };
 }
 
 window.firebaseBindings = {
@@ -465,6 +425,5 @@ window.firebaseBindings = {
   getShips,
   resetGame,
   setupForfeitOnDisconnect,
-  clearForfeitOnDisconnect,
-  monitorOpponentHeartbeat
+  clearForfeitOnDisconnect
 };
