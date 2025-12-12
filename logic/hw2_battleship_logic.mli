@@ -55,8 +55,13 @@ module Game_mode : sig
 end
 
 module Phase : sig
+  type placement_status = {
+    p1_ready: bool;
+    p2_ready: bool;
+  }
+
   type t =
-    | Placement of Player_kind.t
+    | Placement of placement_status
     | In_progress
     | Game_over
   [@@deriving sexp, compare, equal]

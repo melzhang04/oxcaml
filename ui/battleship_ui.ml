@@ -164,8 +164,26 @@ let setup_screen ~on_start =
         ];
     ]
 
+(* Waiting Screens *)
+let waiting_for_opponent_screen msg =
+  Vdom.Node.div
+    ~attrs:[ Vdom.Attr.class_ "setup-screen" ]
+    [
+      Vdom.Node.h1 [ Vdom.Node.text msg ];
+      Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "spinner" ] [];
+    ]
+
+let waiting_screen =
+  Vdom.Node.div
+    ~attrs:[ Vdom.Attr.class_ "setup-screen" ]
+    [
+      Vdom.Node.h1 [ Vdom.Node.text "BATTLESHIP" ];
+      Vdom.Node.h3 [ Vdom.Node.text "Searching for opponent..." ];
+      Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "spinner" ] [];
+    ]
+
 (* Placement Screen *)
-let placement_screen ~state ~set_game_state ~on_confirm =
+let placement_screen ~state ~set_game_state ~on_confirm ~local_player =
   let%sub selected_ship, set_selected_ship = Bonsai.state_opt (module String) in
   let%sub horizontal, set_horizontal =
     Bonsai.state (module Bool) ~default_model:true
@@ -178,11 +196,12 @@ let placement_screen ~state ~set_game_state ~on_confirm =
   and state = state
   and set_game_state = set_game_state
   and on_confirm = on_confirm
+  and local_player = local_player
   in
 
   let player =
     match state.phase with
-    | Phase.Placement p -> p
+    | Phase.Placement _ -> local_player
     | _ -> Player_kind.P1
   in
 
@@ -353,8 +372,8 @@ let placement_screen ~state ~set_game_state ~on_confirm =
         [
           Vdom.Node.text
             (match player with
-            | Player_kind.P1 -> "PLAYER 1 — Place Your Ships"
-            | Player_kind.P2 -> "PLAYER 2 — Place Your Ships");
+            | Player_kind.P1 -> "Place Your Ships"
+            | Player_kind.P2 -> "Place Your Ships");
         ];
       placement_row;
       Vdom.Node.div
@@ -372,8 +391,7 @@ let pick_ai_move (mode : Game_mode.t) (state : Game_state.t)
   | Game_mode.PvP -> None
 
 (* Game Screen *)
-
-let game_screen ~state ~set_game_state ~on_reset ~local_player =
+let game_screen ~state ~set_game_state ~on_reset ~local_player ~game_id_opt =
   let apply_ai ns =
     match ns.mode, ns.decision with
     | (Game_mode.PvE_easy | Game_mode.PvE_hard as mode),
@@ -383,7 +401,6 @@ let game_screen ~state ~set_game_state ~on_reset ~local_player =
             match pick_ai_move mode ns ~time_ms:20 with
             | None -> Vdom.Effect.Ignore
             | Some mv ->
-                (* Schedule AI move with delay *)
                 let open Js_of_ocaml in
                 let callback () =
                   match Game_state.make_move ns mv with
@@ -398,12 +415,30 @@ let game_screen ~state ~set_game_state ~on_reset ~local_player =
         else Vdom.Effect.Ignore
     | _ -> Vdom.Effect.Ignore
   in
-  
-  let handle_click pos =
-    match Game_state.make_move state pos with
-    | Ok ns ->
-        Vdom.Effect.Many [ set_game_state ns; apply_ai ns ]
-    | Error _ -> Vdom.Effect.Ignore
+
+let handle_click pos =
+  match state.mode with
+  | Game_mode.PvP ->
+      (match game_id_opt with
+       | None -> Vdom.Effect.Ignore
+       | Some game_id ->
+           (match Game_state.make_move state pos with
+            | Ok new_state ->
+                let player_str =
+                  match local_player with
+                  | Player_kind.P1 -> "P1"
+                  | Player_kind.P2 -> "P2"
+                in
+                F.send_move ~game_id
+                  ~row:pos.Cell_position.row
+                  ~col:pos.Cell_position.column
+                  ~player:player_str;
+                set_game_state new_state
+            | Error _ -> Vdom.Effect.Ignore))
+  | _ ->
+      (match Game_state.make_move state pos with
+       | Ok ns -> Vdom.Effect.Many [ set_game_state ns; apply_ai ns ]
+       | Error _ -> Vdom.Effect.Ignore)
   in
 
   let is_game_over =
@@ -475,142 +510,341 @@ let game_screen ~state ~set_game_state ~on_reset ~local_player =
             [ Vdom.Node.text "Reset Game" ];
         ];
     ]
-(* Root App *)
 
+(* Root App *)
 let battleship_app =
   let%sub signed_in, set_signed_in =
     Bonsai.state (module Bool) ~default_model:false
   in
-
   let%sub user_id, set_user_id = Bonsai.state_opt (module String) in
-
-  let%sub setup_mode, set_setup_mode =
-    Bonsai.state_opt (module Game_mode)
-  in
-  let%sub game_state, set_game_state =
+  let%sub setup_mode, set_setup_mode = Bonsai.state_opt (module Game_mode) in
+  let%sub game_state, set_game_state = Bonsai.state_opt (module Game_state) in
+  (* base_state = state at the moment both players are ready & fleets loaded *)
+  let%sub base_state, set_base_state =
     Bonsai.state_opt (module Game_state)
   in
 
-  let local_player = Player_kind.P1 in
+  let%sub match_info, set_match_info = Bonsai.state_opt (module String) in
+  let%sub waiting_for_match, set_waiting_for_match =
+    Bonsai.state (module Bool) ~default_model:false
+  in
+  let%sub ready_status_subscribed, set_ready_status_subscribed =
+    Bonsai.state (module Bool) ~default_model:false
+  in
+  let%sub move_subscribed, set_move_subscribed =
+    Bonsai.state (module Bool) ~default_model:false
+  in
+
+  let local_player_val =
+    Bonsai.Value.map match_info ~f:(function
+      | None -> Player_kind.P1
+      | Some s ->
+          if String.is_suffix s ~suffix:"P2" then Player_kind.P2
+          else Player_kind.P1)
+  in
+
+  let game_id_val =
+    Bonsai.Value.map match_info ~f:(function
+      | None -> None
+      | Some s ->
+          match String.split s ~on:'|' with
+          | gid :: _ -> Some gid
+          | _ -> None)
+  in
 
   let set_game_state_non_opt =
-    Bonsai.Value.map set_game_state ~f:(fun f s -> f (Some s))
+    Bonsai.Value.map set_game_state ~f:(fun f st -> f (Some st))
   in
 
   let on_confirm =
-    Bonsai.Value.map3 game_state set_game_state setup_mode
-      ~f:(fun gs set mode ->
+    Bonsai.Value.map5 game_state set_game_state setup_mode local_player_val game_id_val
+      ~f:(fun gs set mode local_player game_id_opt ->
         match gs with
-        | None -> fun () -> Vdom.Effect.Ignore
+        | None -> (fun () -> Vdom.Effect.Ignore)
         | Some st ->
             fun () ->
-              let next =
+              let updated =
                 match st.phase, mode with
-                | Phase.Placement Player_kind.P1, Some (Game_mode.PvE_easy | Game_mode.PvE_hard as _m)
-                  ->
-                    let seed = Random.int_incl 0 100_000 in
-                    let st' =
-                      Game_state.randomize_player_fleet st
-                        ~player:Player_kind.P2 ~seed
+                | Phase.Placement placement, Some Game_mode.PvP ->
+                    let is_p1_local =
+                      Player_kind.equal local_player Player_kind.P1
                     in
-                    { st' with phase = Phase.In_progress }
-                | Phase.Placement Player_kind.P1, Some Game_mode.PvP ->
-                    { st with phase = Phase.In_progress }
-                | Phase.Placement Player_kind.P2, _ ->
-                    { st with phase = Phase.In_progress }
+                    (match game_id_opt with
+                     | Some game_id ->
+                         let ships =
+                           if is_p1_local then st.p1_board.ships
+                           else st.p2_board.ships
+                         in
+                         let ships_str =
+                           ships |> [%sexp_of: Ship.t list] |> Sexp.to_string
+                         in
+                         let pstr = if is_p1_local then "P1" else "P2" in
+                         F.set_player_ships ~game_id ~player:pstr ~ships_json:ships_str;
+                         F.mark_player_ready ~game_id ~player:pstr
+                     | None -> ());
+                    let placement' =
+                      if is_p1_local then
+                        { placement with Phase.p1_ready = true }
+                      else
+                        { placement with Phase.p2_ready = true }
+                    in
+                    { st with phase = Phase.Placement placement' }
+
+                | Phase.Placement placement,
+                  Some (Game_mode.PvE_easy | Game_mode.PvE_hard) ->
+                    if placement.Phase.p1_ready then st
+                    else
+                      let seed = Random.int_incl 0 100_000 in
+                      let st' =
+                        Game_state.randomize_player_fleet st
+                          ~player:Player_kind.P2 ~seed
+                      in
+                      { st' with phase = Phase.In_progress }
+
                 | _ -> st
               in
-              set (Some next))
-  in 
+              set (Some updated))
+  in
+
   let%sub placement_view =
     match%sub game_state with
     | None -> Bonsai.const (Vdom.Node.text "")
     | Some st ->
-        placement_screen ~state:st ~set_game_state:set_game_state_non_opt
-          ~on_confirm:on_confirm
+        placement_screen
+          ~state:st
+          ~set_game_state:set_game_state_non_opt
+          ~on_confirm
+          ~local_player:local_player_val
   in
 
   let%sub auth_bar =
-  let%arr signed_in = signed_in
-  and user_id = user_id
-  and set_signed_in = set_signed_in
-  and set_user_id = set_user_id in
-  
-  let label =
-    match (signed_in, user_id) with
-    | false, _ -> "Sign In (Guest)"
-    | true, None -> "Signed in..."
-    | true, Some uid -> "User: " ^ String.prefix uid 8
-  in
-  
-  let on_sign_in _ev =
-    F.sign_in_guest ();
-    let uid_opt = F.get_current_uid () in
-    let set_uid_eff =
-      match uid_opt with
-      | Some uid -> set_user_id (Some uid)
-      | None -> Vdom.Effect.Ignore
+    let%arr signed_in = signed_in
+    and user_id = user_id
+    and set_signed_in = set_signed_in
+    and set_user_id = set_user_id in
+
+    let label =
+      match signed_in, user_id with
+      | false, _ -> "Sign In (Guest)"
+      | true, None -> "Signed in..."
+      | true, Some uid -> "User: " ^ String.prefix uid 6
     in
-    Vdom.Effect.Many [ set_uid_eff; set_signed_in true ]
-  in
-  
-  let on_sign_out _ev =
-    F.sign_out ();
-    Vdom.Effect.Many [ set_user_id None; set_signed_in false ]
-  in
-  
-  Vdom.Node.div
-    ~attrs:[ Vdom.Attr.class_ "auth-bar" ]
-    (if signed_in then
-      [
-        Vdom.Node.button
-          ~attrs:[ Vdom.Attr.create "disabled" "disabled" ]
-          [ Vdom.Node.text label ];
-        Vdom.Node.button
-          ~attrs:[ Vdom.Attr.on_click on_sign_out ]
-          [ Vdom.Node.text "Sign Out" ];
-      ]
-    else
-      [
-        Vdom.Node.button
-          ~attrs:[ Vdom.Attr.on_click on_sign_in ]
-          [ Vdom.Node.text label ];
-      ])
+
+    let on_sign_in _ =
+      F.sign_in_guest ();
+      let uid_opt = F.get_current_uid () in
+      let eff =
+        match uid_opt with
+        | Some uid -> set_user_id (Some uid)
+        | None -> Vdom.Effect.Ignore
+      in
+      Vdom.Effect.Many [ eff; set_signed_in true ]
+    in
+
+    let on_sign_out _ =
+      F.sign_out ();
+      Vdom.Effect.Many [ set_user_id None; set_signed_in false ]
+    in
+
+    Vdom.Node.div
+      ~attrs:[ Vdom.Attr.class_ "auth-bar" ]
+      (if signed_in then
+         [
+           Vdom.Node.button
+             ~attrs:[ Vdom.Attr.create "disabled" "disabled" ]
+             [ Vdom.Node.text label ];
+           Vdom.Node.button
+             ~attrs:[ Vdom.Attr.on_click on_sign_out ]
+             [ Vdom.Node.text "Sign Out" ];
+         ]
+       else
+         [
+           Vdom.Node.button
+             ~attrs:[ Vdom.Attr.on_click on_sign_in ]
+             [ Vdom.Node.text label ];
+         ])
   in
 
   let%arr setup_mode = setup_mode
   and set_setup_mode = set_setup_mode
   and game_state = game_state
   and set_game_state = set_game_state
+  and _base_state = base_state
+  and set_base_state = set_base_state
   and placement_view = placement_view
   and auth_bar = auth_bar
+  and match_info = match_info
+  and set_match_info = set_match_info
+  and _waiting_for_match = waiting_for_match
+  and set_waiting_for_match = set_waiting_for_match
+  and local_player = local_player_val
+  and game_id_opt = game_id_val
+  and ready_status_subscribed = ready_status_subscribed
+  and set_ready_status_subscribed = set_ready_status_subscribed
+  and move_subscribed = move_subscribed
+  and set_move_subscribed = set_move_subscribed
+  in
+  let () =
+    match match_info with
+    | Some match_str ->
+        let game_id =
+          match String.split match_str ~on:'|' with
+          | gid :: _ -> gid
+          | _ -> ""
+        in
+        if not ready_status_subscribed then begin
+          F.subscribe_ready_status ~game_id ~on_ready:(fun status ->
+              if String.equal status "BOTH_READY" then
+                F.get_ships ~game_id ~on_result:(fun joined ->
+                    let open Js_of_ocaml in
+                    let callback () =
+                      match game_state with
+                      | Some st ->
+                          let p1_json, p2_json =
+                            match String.lsplit2 joined ~on:';' with
+                            | Some (a, b) -> (a, b)
+                            | None -> (joined, "[]")
+                          in
+                          let p1_ships =
+                            Sexp.of_string p1_json |> [%of_sexp: Ship.t list]
+                          in
+                          let p2_ships =
+                            Sexp.of_string p2_json |> [%of_sexp: Ship.t list]
+                          in
+                          let base_st =
+                            { st with
+                              p1_board = { st.p1_board with ships = p1_ships }
+                            ; p2_board = { st.p2_board with ships = p2_ships }
+                            ; phase = Phase.In_progress
+                            }
+                          in
+                          (* Set up move subscription NOW with the base_st we just created *)
+                          if not move_subscribed then begin
+                            F.subscribe_game game_id (fun moves_joined ->
+                                let moves =
+                                  moves_joined
+                                  |> String.split ~on:';'
+                                  |> List.filter ~f:(fun s -> not (String.is_empty s))
+                                in
+                                let final_state =
+                                  List.fold moves ~init:base_st ~f:(fun st move_str ->
+                                      match String.split move_str ~on:',' with
+                                      | [ row; col; _shooter_str ] ->
+                                          let mv =
+                                            { Cell_position.row = Int.of_string row
+                                            ; column = Int.of_string col
+                                            }
+                                          in
+                                          (match Game_state.make_move st mv with
+                                          | Ok st' -> st'
+                                          | Error _ -> st)
+                                      | _ -> st)
+                                in
+                                let eff = set_game_state (Some final_state) in
+                                Vdom.Effect.Expert.handle_non_dom_event_exn eff);
+                            let eff = set_move_subscribed true in
+                            Vdom.Effect.Expert.handle_non_dom_event_exn eff
+                          end;
+                          let eff =
+                            Vdom.Effect.Many
+                              [ set_base_state (Some base_st)
+                              ; set_game_state (Some base_st)
+                              ]
+                          in
+                          Vdom.Effect.Expert.handle_non_dom_event_exn eff
+                      | None -> ()
+                    in
+                    let _ = Dom_html.setTimeout callback 0. in
+                    ()));
+          let eff = set_ready_status_subscribed true in
+          Vdom.Effect.Expert.handle_non_dom_event_exn eff
+        end
+    | None -> ()
   in
 
   let main_view =
-    match (setup_mode, game_state) with
-    | None, _ ->
-        setup_screen
-          ~on_start:(fun mode ->
-            (match mode with
-            | Game_mode.PvP ->
-                F.request_quick_match (fun s ->
-                    Firebug.console##log
-                      (Js.string ("Matched: " ^ s)))
-            | _ -> ());
+    match setup_mode with
+    | None ->
+        setup_screen ~on_start:(fun mode ->
             let init = Game_state.create_empty ~rows:10 ~cols:10 ~mode in
-            Vdom.Effect.Many
-              [ set_setup_mode (Some mode); set_game_state (Some init) ])
-    | Some _, Some st -> (
-        match st.phase with
-        | Phase.Placement _ -> placement_view
-        | Phase.In_progress | Phase.Game_over ->
-            game_screen ~state:st
-              ~set_game_state:(fun s -> set_game_state (Some s))
-              ~on_reset:(fun () ->
+            match mode with
+            | Game_mode.PvP ->
+                F.request_quick_match (fun match_str ->
+                    let eff =
+                      Vdom.Effect.Many
+                        [ set_match_info (Some match_str)
+                        ; set_waiting_for_match false
+                        ]
+                    in
+                    Vdom.Effect.Expert.handle_non_dom_event_exn eff);
                 Vdom.Effect.Many
-                  [ set_game_state None; set_setup_mode None ])
-              ~local_player)
-    | Some _, None -> Vdom.Node.text "Loading..."
+                  [ set_setup_mode (Some mode)
+                  ; set_game_state (Some init)
+                  ; set_base_state None
+                  ; set_waiting_for_match true
+                  ]
+            | _ ->
+                Vdom.Effect.Many
+                  [ set_setup_mode (Some mode)
+                  ; set_game_state (Some init)
+                  ; set_base_state None
+                  ])
+
+    | Some Game_mode.PvP ->
+        (match match_info with
+         | None -> waiting_screen
+         | Some _ ->
+             match game_state with
+             | None -> Vdom.Node.text "Loading..."
+             | Some st ->
+                 (match st.phase with
+                  | Phase.Placement status ->
+                      let is_p1_local =
+                        Player_kind.equal local_player Player_kind.P1
+                      in
+                      let local_ready =
+                        if is_p1_local then status.p1_ready else status.p2_ready
+                      in
+                      if local_ready then
+                        waiting_for_opponent_screen
+                          "Waiting for opponent to place ships..."
+                      else placement_view
+                  | Phase.In_progress | Phase.Game_over ->
+                      game_screen
+                        ~state:st
+                        ~set_game_state:(fun ns ->
+                          set_game_state (Some ns))
+                        ~on_reset:(fun () ->
+                          Vdom.Effect.Many
+                            [ set_game_state None
+                            ; set_base_state None
+                            ; set_setup_mode None
+                            ; set_match_info None
+                            ; set_waiting_for_match false
+                            ; set_ready_status_subscribed false
+                            ; set_move_subscribed false
+                            ])
+                        ~local_player
+                        ~game_id_opt))
+
+    | Some _non_pvp_mode ->
+        (match game_state with
+         | None -> Vdom.Node.text "Loading..."
+         | Some st ->
+             match st.phase with
+             | Phase.Placement plc ->
+                 if plc.p1_ready then waiting_screen else placement_view
+             | Phase.In_progress | Phase.Game_over ->
+                 game_screen
+                   ~state:st
+                   ~set_game_state:(fun ns -> set_game_state (Some ns))
+                   ~on_reset:(fun () ->
+                     Vdom.Effect.Many
+                       [ set_game_state None
+                       ; set_base_state None
+                       ; set_setup_mode None ])
+                   ~local_player
+                   ~game_id_opt)
   in
 
   Vdom.Node.div [ auth_bar; main_view ]

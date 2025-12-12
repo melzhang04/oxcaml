@@ -15,6 +15,22 @@ class type firebase_api = object
 
   method sendMove :
     Js.js_string Js.t -> int -> int -> Js.js_string Js.t -> unit Js.meth
+
+  method setPlayerShips :
+    Js.js_string Js.t -> Js.js_string Js.t -> Js.js_string Js.t -> unit Js.meth
+
+  method markPlayerReady :
+    Js.js_string Js.t -> Js.js_string Js.t -> unit Js.meth
+
+  method subscribeReadyStatus :
+    Js.js_string Js.t ->
+    (Js.js_string Js.t -> unit) Js.callback ->
+    unit Js.meth
+
+  method getShips :
+    Js.js_string Js.t ->
+    (Js.js_string Js.t -> unit) Js.callback ->
+    unit Js.meth
 end
 
 let firebase : firebase_api Js.t =
@@ -54,3 +70,30 @@ let send_move ~(game_id : string) ~(row : int) ~(col : int)
     row
     col
     (Js.string player)
+
+let set_player_ships ~(game_id : string) ~(player : string) ~(ships_json : string) : unit =
+  firebase##setPlayerShips
+    (Js.string game_id)
+    (Js.string player)
+    (Js.string ships_json)
+
+let mark_player_ready ~(game_id : string) ~(player : string) : unit =
+  firebase##markPlayerReady
+    (Js.string game_id)
+    (Js.string player)
+
+let subscribe_ready_status ~(game_id : string) ~(on_ready : string -> unit) : unit =
+  let cb =
+    Js.wrap_callback (fun s ->
+        let str = Js.to_string s in
+        on_ready str)
+  in
+  firebase##subscribeReadyStatus (Js.string game_id) cb
+
+let get_ships ~(game_id : string) ~(on_result : string -> unit) : unit =
+  let cb =
+    Js.wrap_callback (fun s ->
+        let str = Js.to_string s in
+        on_result str)
+  in
+  firebase##getShips (Js.string game_id) cb

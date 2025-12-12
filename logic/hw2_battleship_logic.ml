@@ -54,10 +54,17 @@ module Game_mode = struct
 end
 
 module Phase = struct
-  type t = Placement of Player_kind.t | In_progress | Game_over
+  type placement_status = {
+    p1_ready: bool;
+    p2_ready: bool;
+  } [@@deriving sexp, compare, equal]
+
+  type t = 
+    | Placement of placement_status
+    | In_progress 
+    | Game_over
   [@@deriving sexp, compare, equal]
 end
-
 module Game_state = struct
   type t =
     { p1_board : Board.t
@@ -199,37 +206,29 @@ module Game_state = struct
            }
       else Error errs
 
-  let create_empty ~rows ~cols ~mode =
-    let empty_board =
-      { Board.rows = rows; cols; ships = []; shots = Map.empty (module Cell_position) }
-    in
-    { p1_board = empty_board
-    ; p2_board = empty_board
-    ; decision = Decision.In_progress { whose_turn = Player_kind.P1 }
-    ; last_move = None
-    ; phase = Phase.Placement Player_kind.P1
-    ; mode
-    }
+let create_empty ~rows ~cols ~mode =
+  let empty_board =
+    { Board.rows = rows; cols; ships = []; shots = Map.empty (module Cell_position) }
+  in
+  { p1_board = empty_board
+  ; p2_board = empty_board
+  ; decision = Decision.In_progress { whose_turn = Player_kind.P1 }
+  ; last_move = None
+  ; phase = Phase.Placement { p1_ready = false; p2_ready = false }
+  ; mode
+  }
 
-  let place_player_fleet t ~player ~ships =
-    match Ship_rules.validate_fleet ~rows:t.p1_board.rows ~cols:t.p1_board.cols ships with
-    | [] ->
-        (match player with
-         | Player_kind.P1 ->
-             { t with
-               p1_board = { t.p1_board with ships }
-             ; phase =
-                 (match t.phase with
-                  | Phase.Placement Player_kind.P1 -> Phase.Placement Player_kind.P2
-                  | _ -> t.phase)
-             }
-         | Player_kind.P2 ->
-             { t with
-               p2_board = { t.p2_board with ships }
-             ; phase = Phase.In_progress })
-    | errs ->
-        failwithf "Invalid fleet placement: %s"
-          (Sexp.to_string ([%sexp_of: Create_error.t list] errs)) ()
+let place_player_fleet t ~player ~ships =
+  match Ship_rules.validate_fleet ~rows:t.p1_board.rows ~cols:t.p1_board.cols ships with
+  | [] ->
+      (match player with
+       | Player_kind.P1 ->
+           { t with p1_board = { t.p1_board with ships } }
+       | Player_kind.P2 ->
+           { t with p2_board = { t.p2_board with ships } })
+  | errs ->
+      failwithf "Invalid fleet placement: %s"
+        (Sexp.to_string ([%sexp_of: Create_error.t list] errs)) ()
 
   let randomize_player_fleet t ~player ~seed =
     let ships = random_fleet ~rows:t.p1_board.rows ~cols:t.p1_board.cols ~player ~seed in

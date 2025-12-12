@@ -116,48 +116,42 @@ export async function requestQuickMatch(onMatched) {
   console.log("Joined queue as P1:", uid);
 
   const pollInterval = setInterval(async () => {
-    const gq = query(
-      collection(db, "games"),
-      orderBy("createdAt"),
-      limit(10)
-    );
-    const gamesSnap = await getDocs(gq);
+    const queueDoc = await getDoc(doc(db, "matchQueue", uid));
 
-    let found = null;
-    gamesSnap.forEach((g) => {
-      const data = g.data();
-      if (data.p1 === uid || data.p2 === uid) {
-        found = { id: g.id, data };
+    if (!queueDoc.exists()) {
+      const gq = query(
+        collection(db, "games"),
+        orderBy("createdAt", "desc"),
+        limit(20)
+      );
+      const gamesSnap = await getDocs(gq);
+
+      let found = null;
+      gamesSnap.forEach((g) => {
+        const data = g.data();
+        if (data.p1 === uid || data.p2 === uid) {
+          found = { id: g.id, data };
+        }
+      });
+
+      if (found) {
+        clearInterval(pollInterval);
+        const role = (found.data.p1 === uid) ? "P1" : "P2";
+        console.log("Matched as", role, "in game:", found.id);
+        onMatched(`${found.id}|${role}`);
       }
-    });
-
-    if (found) {
-      clearInterval(pollInterval);
-      await deleteDoc(doc(db, "matchQueue", uid));
-
-      const role = (found.data.p1 === uid) ? "P1" : "P2";
-      console.log("Matched as", role, "in game:", found.id);
-      onMatched(`${found.id}|${role}`);
     }
-  }, 1000);
+  }, 500);
 }
-
 export function subscribeGame(gameId, onUpdate) {
   const gameRef = doc(db, "games", gameId);
-
-  let lastMovesLen = 0;
 
   const unsub = onSnapshot(gameRef, (snap) => {
     if (!snap.exists()) return;
     const data = snap.data();
     const moves = data.moves || [];
-    if (moves.length > lastMovesLen) {
-      const newMoves = moves.slice(lastMovesLen);
-      lastMovesLen = moves.length;
-      newMoves.forEach((m) => {
-        onUpdate(m);
-      });
-    }
+    const joined = moves.join(";");
+    onUpdate(joined);
   });
 
   return unsub;
@@ -172,11 +166,67 @@ export async function sendMove(gameId, row, col, player) {
   console.log("Sent move:", moveStr, "to game:", gameId);
 }
 
+export async function setPlayerShips(gameId, player, shipsJson) {
+  const gameRef = doc(db, "games", gameId);
+  const fieldName = player === "P1" ? "p1Ships" : "p2Ships";
+  await updateDoc(gameRef, {
+    [fieldName]: shipsJson
+  });
+  console.log(`Set ships for ${player} in game ${gameId}`);
+}
+
+export async function markPlayerReady(gameId, player) {
+  const gameRef = doc(db, "games", gameId);
+  const fieldName = player === "P1" ? "p1Ready" : "p2Ready";
+  await updateDoc(gameRef, {
+    [fieldName]: true
+  });
+  console.log(`Marked ${player} ready in game ${gameId}`);
+}
+
+export function subscribeReadyStatus(gameId, onReady) {
+  const gameRef = doc(db, "games", gameId);
+  
+  const unsub = onSnapshot(gameRef, (snap) => {
+    if (!snap.exists()) return;
+    const data = snap.data();
+    const p1Ready = data.p1Ready || false;
+    const p2Ready = data.p2Ready || false;
+    
+    if (p1Ready && p2Ready) {
+      onReady("BOTH_READY");
+    }
+  });
+  
+  return unsub;
+}
+
+export async function getShips(gameId, callback) {
+  const gameRef = doc(db, "games", gameId);
+  const snap = await getDoc(gameRef);
+
+  if (!snap.exists()) {
+    console.error("getShips: game not found", gameId);
+    callback("");
+    return;
+  }
+
+  const data = snap.data();
+  const p1Ships = data.p1Ships || "[]";
+  const p2Ships = data.p2Ships || "[]";
+  const joined = `${p1Ships};${p2Ships}`;
+  callback(joined);
+}
+
 window.firebaseBindings = {
   signInGuest,
   signOutUser,
   getCurrentUid,
   requestQuickMatch,
   subscribeGame,
-  sendMove
+  sendMove,
+  setPlayerShips,
+  markPlayerReady,
+  subscribeReadyStatus,
+  getShips
 };
