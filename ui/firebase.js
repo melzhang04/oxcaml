@@ -40,6 +40,18 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+let tabId = sessionStorage.getItem('battleship_tab_id');
+if (!tabId) {
+  tabId = `tab_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+  sessionStorage.setItem('battleship_tab_id', tabId);
+}
+
+function getUniquePlayerId() {
+  const uid = getCurrentUid();
+  if (!uid) return null;
+  return `${uid}_${tabId}`;
+}
+
 export function signInGuest() {
   return signInAnonymously(auth)
     .then((cred) => {
@@ -78,110 +90,125 @@ export async function requestQuickMatch(onMatched) {
     return;
   }
 
-  let matchResult = null;
-  
-  try {
-    await runTransaction(db, async (transaction) => {
-      const queueRef = collection(db, "matchQueue");
-      const q = query(queueRef, orderBy("timestamp"), limit(10));
-      const snap = await getDocs(q);
-      
-      for (const docSnap of snap.docs) {
-        const opponentUid = docSnap.id;
-        if (opponentUid !== uid) {
-          const opponentRef = doc(db, "matchQueue", opponentUid);
-          const opponentDoc = await transaction.get(opponentRef);
-          
-          if (opponentDoc.exists()) {
-            const seed = Math.floor(Math.random() * 1_000_000);
-            const gameRef = doc(collection(db, "games"));
-            
-            transaction.set(gameRef, {
-              p1: opponentUid,
-              p2: uid,
-              seed: seed,
-              moves: [],
-              status: "ACTIVE",
-              p1Ships: "[]",
-              p2Ships: "[]",
-              p1Ready: false,
-              p2Ready: false,
-              createdAt: serverTimestamp()
-            });
-            
-            transaction.delete(opponentRef);
-            matchResult = { gameId: gameRef.id, role: "P2" };
-            return;
-          }
-        }
-      }
-      
-      if (!matchResult) {
-        const myQueueRef = doc(db, "matchQueue", uid);
-        transaction.set(myQueueRef, {
-          uid,
-          timestamp: serverTimestamp()
-        });
-      }
-    });
-  } catch (err) {
-    console.error("Error in matchmaking transaction:", err);
+  const playerId = getUniquePlayerId();
+  if (!playerId) {
+    console.error("requestQuickMatch: no player id");
     return;
   }
 
+  console.log("Starting matchmaking for:", playerId);
+
+  const matchResult = await runTransaction(db, async (transaction) => {
+    const queueRef = collection(db, "matchQueue");
+    const queueSnap = await getDocs(query(queueRef, orderBy("timestamp"), limit(50)));
+
+    let opponentDoc = null;
+
+    for (const docSnap of queueSnap.docs) {
+      const opponentPlayerId = docSnap.id;
+
+      if (opponentPlayerId === playerId) {
+        continue;
+      }
+
+      opponentDoc = docSnap;
+      break;
+    }
+
+    if (opponentDoc) {
+      const opponentPlayerId = opponentDoc.id;
+      const opponentData = opponentDoc.data();
+      
+      console.log("Found opponent:", opponentPlayerId);
+      
+      const seed = Math.floor(Math.random() * 1_000_000);
+      const gameRef = doc(collection(db, "games"));
+
+      transaction.set(gameRef, {
+        p1: opponentPlayerId,
+        p2: playerId,
+        p1Uid: opponentData.uid,
+        p2Uid: uid,
+        seed: seed,
+        moves: [],
+        status: "ACTIVE",
+        p1Ships: "[]",
+        p2Ships: "[]",
+        p1Ready: false,
+        p2Ready: false,
+        createdAt: serverTimestamp()
+      });
+
+      transaction.delete(doc(db, "matchQueue", opponentPlayerId));
+
+      console.log("Created match as P2 in game:", gameRef.id);
+      return { gameId: gameRef.id, role: "P2" };
+    }
+
+    transaction.set(doc(db, "matchQueue", playerId), {
+      playerId,
+      uid,
+      timestamp: serverTimestamp()
+    });
+
+    console.log("No opponent found, joining queue");
+    return null;
+  });
+
   if (matchResult) {
-    console.log("Matched as", matchResult.role, "in game:", matchResult.gameId);
     onMatched(`${matchResult.gameId}|${matchResult.role}`);
     return;
   }
 
-  console.log("Joined queue as P1:", uid);
-
+  console.log("Listening for match as P1...");
+  
+  let hasMatched = false;
+  let unsubQueue = null;
   let pollTimeout = null;
-  const unsubQueue = onSnapshot(doc(db, "matchQueue", uid), async (queueSnap) => {
-    if (!queueSnap.exists()) {
-      if (pollTimeout) {
-        clearTimeout(pollTimeout);
-      }
-      
-      const gq = query(
-        collection(db, "games"),
-        orderBy("createdAt", "desc"),
-        limit(20)
-      );
-      const gamesSnap = await getDocs(gq);
 
-      let found = null;
-      gamesSnap.forEach((g) => {
-        const data = g.data();
-        const isRecent = data.createdAt && 
-          (Date.now() - data.createdAt.toMillis()) < 30000;
-        const isActive = data.status === "ACTIVE";
-        
-        if (isActive && isRecent && (data.p1 === uid || data.p2 === uid)) {
-          found = { id: g.id, data };
-        }
-      });
+  const checkForMatch = async () => {
+    if (hasMatched) return;
 
-      if (found) {
-        unsubQueue();
-        const role = (found.data.p1 === uid) ? "P1" : "P2";
-        console.log("Matched as", role, "in game:", found.id);
-        onMatched(`${found.id}|${role}`);
-      } else {
-        console.log("Queue entry deleted but no game found - rejoining");
-        await setDoc(doc(db, "matchQueue", uid), {
-          uid,
-          timestamp: serverTimestamp()
-        });
+    const gamesQuery = query(
+      collection(db, "games"),
+      orderBy("createdAt", "desc"),
+      limit(20)
+    );
+    const gamesSnap = await getDocs(gamesQuery);
+
+    for (const gameDoc of gamesSnap.docs) {
+      const data = gameDoc.data();
+      const isRecent = data.createdAt &&
+        (Date.now() - data.createdAt.toMillis()) < 30000;
+      const isActive = data.status === "ACTIVE";
+
+      if (isActive && isRecent && data.p1 === playerId) {
+        hasMatched = true;
+        if (unsubQueue) unsubQueue();
+        if (pollTimeout) clearTimeout(pollTimeout);
+        console.log("Matched as P1 in game:", gameDoc.id);
+        onMatched(`${gameDoc.id}|P1`);
+        return;
       }
+    }
+  };
+
+  await checkForMatch();
+  if (hasMatched) return;
+
+  unsubQueue = onSnapshot(doc(db, "matchQueue", playerId), async (queueSnap) => {
+    if (!queueSnap.exists() && !hasMatched) {
+      console.log("Queue entry deleted - checking for match");
+      await checkForMatch();
     }
   });
 
   pollTimeout = setTimeout(() => {
-    console.log("Matchmaking timeout - removing from queue");
-    unsubQueue();
-    deleteDoc(doc(db, "matchQueue", uid)).catch(() => {});
+    if (!hasMatched) {
+      console.log("Matchmaking timeout - removing from queue");
+      if (unsubQueue) unsubQueue();
+      deleteDoc(doc(db, "matchQueue", playerId)).catch(() => {});
+    }
   }, 60000);
 }
 
@@ -254,12 +281,12 @@ export async function markPlayerReady(gameId, player) {
 }
 
 export async function cancelMatchmaking() {
-  const uid = getCurrentUid();
-  if (!uid) return;
+  const playerId = getUniquePlayerId();
+  if (!playerId) return;
   
   try {
-    await deleteDoc(doc(db, "matchQueue", uid));
-    console.log("Removed from matchmaking queue:", uid);
+    await deleteDoc(doc(db, "matchQueue", playerId));
+    console.log("Removed from matchmaking queue:", playerId);
   } catch (err) {
     console.error("Error removing from queue:", err);
   }
@@ -343,17 +370,15 @@ export function setupForfeitOnDisconnect(gameId, player) {
     }
   }, 3000);
 
-  forfeitOnUnloadHandler = () => {
-    console.log(`${player} is leaving - triggering forfeit`);
+  forfeitOnUnloadHandler = (event) => {
+    console.log(`${player} is leaving page - triggering forfeit`);
     
-    // Use synchronous approach for mobile reliability
     const forfeitData = {
       status: "FORFEIT",
       forfeitBy: player,
       forfeitAt: serverTimestamp()
     };
-    
-    // Try to update immediately (may not complete on mobile)
+
     updateDoc(gameRef, forfeitData).catch(err => 
       console.error("Error setting forfeit status:", err)
     );
@@ -361,28 +386,6 @@ export function setupForfeitOnDisconnect(gameId, player) {
   
   window.addEventListener("beforeunload", forfeitOnUnloadHandler);
   window.addEventListener("pagehide", forfeitOnUnloadHandler);
-  
-  const visibilityHandler = () => {
-    if (document.hidden) {
-      console.log(`${player} tab hidden - will forfeit if not back soon`);
-      setTimeout(async () => {
-        if (document.hidden) {
-          console.log(`${player} still hidden - forfeiting`);
-          try {
-            await updateDoc(gameRef, {
-              status: "FORFEIT",
-              forfeitBy: player,
-              forfeitAt: serverTimestamp()
-            });
-          } catch (err) {
-            console.error("Error setting forfeit on visibility change:", err);
-          }
-        }
-      }, 10000);
-    }
-  };
-  
-  document.addEventListener("visibilitychange", visibilityHandler);
   
   return () => {
     if (heartbeatInterval) {
@@ -394,7 +397,6 @@ export function setupForfeitOnDisconnect(gameId, player) {
       window.removeEventListener("pagehide", forfeitOnUnloadHandler);
       forfeitOnUnloadHandler = null;
     }
-    document.removeEventListener("visibilitychange", visibilityHandler);
   };
 }
 
